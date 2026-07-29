@@ -228,9 +228,19 @@ const SUPABASE_CONFIGURED =
   SUPABASE_URL && SUPABASE_ANON_KEY &&
   !SUPABASE_URL.includes('SEU-PROJETO') && !SUPABASE_ANON_KEY.includes('SUA_ANON_KEY');
 
-const supabase = (SUPABASE_CONFIGURED && window.supabase)
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+let supabase = null;
+let SUPABASE_INIT_ERROR = null;
+if (SUPABASE_CONFIGURED && window.supabase) {
+  try {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (e) {
+    SUPABASE_INIT_ERROR = e.message || String(e);
+    console.error('Erro ao inicializar o Supabase — confira o config.js:', e);
+  }
+} else if (SUPABASE_CONFIGURED && !window.supabase) {
+  SUPABASE_INIT_ERROR = 'O SDK do Supabase não carregou (verifique sua conexão ou se o CDN foi bloqueado).';
+  console.error(SUPABASE_INIT_ERROR);
+}
 
 let currentUser = null;   // set once signed in
 let cloudMode = false;    // true when data lives in Supabase for this session
@@ -331,22 +341,29 @@ if ($('#authToggleBtn')) {
     const email = $('#authEmail').value.trim();
     const password = $('#authPassword').value;
     if (!email || !password) { setAuthError('Preencha e-mail e senha.'); return; }
+    if (!supabase) { setAuthError('Supabase não está configurado neste site (veja config.js). Use "Continuar sem conta".'); return; }
     setAuthError('');
     $('#authSubmitBtn').textContent = 'Aguarde…';
 
-    const action = authMode === 'signin'
-      ? supabase.auth.signInWithPassword({ email, password })
-      : supabase.auth.signUp({ email, password });
+    try {
+      const action = authMode === 'signin'
+        ? supabase.auth.signInWithPassword({ email, password })
+        : supabase.auth.signUp({ email, password });
 
-    const { data, error } = await action;
-    updateAuthModeUI();
+      const { data, error } = await action;
+      updateAuthModeUI();
 
-    if (error) { setAuthError(traduzErroAuth(error.message)); return; }
-    if (!data.session) {
-      setAuthError('Conta criada! Confirme seu e-mail e depois volte para entrar.');
-      return;
+      if (error) { setAuthError(traduzErroAuth(error.message)); return; }
+      if (!data.session) {
+        setAuthError('Conta criada! Confirme seu e-mail e depois volte para entrar.');
+        return;
+      }
+      await startCloudSession(data.session.user);
+    } catch (e) {
+      console.error('Erro inesperado na autenticação:', e);
+      updateAuthModeUI();
+      setAuthError('Não foi possível conectar ao Supabase agora. Tente novamente ou use "Continuar sem conta".');
     }
-    await startCloudSession(data.session.user);
   };
 
   $('#authGuestBtn').onclick = () => startGuestSession();
@@ -379,13 +396,23 @@ function startGuestSession() {
 }
 
 async function boot() {
+  if (SUPABASE_INIT_ERROR) {
+    showAuthScreen(true);
+    setAuthError(`Erro de configuração do Supabase: ${SUPABASE_INIT_ERROR}. Você pode continuar sem conta enquanto ajusta o config.js.`);
+  }
   if (!supabase) { startGuestSession(); return; }
   updateAuthModeUI();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session && session.user) {
-    await startCloudSession(session.user);
-  } else {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      await startCloudSession(session.user);
+    } else {
+      showAuthScreen(true);
+    }
+  } catch (e) {
+    console.error('Erro ao verificar sessão do Supabase:', e);
     showAuthScreen(true);
+    setAuthError('Não foi possível conectar ao Supabase agora. Você pode continuar sem conta.');
   }
 }
 
