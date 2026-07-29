@@ -319,7 +319,45 @@ async function fetchOrCreateCloudState(user) {
   return seed;
 }
 
+async function fetchUserRole(userId) {
+  const { data } = await supabase.from('profiles').select('role, name, email').eq('user_id', userId).single();
+  return data || { role: 'user', name: '', email: '' };
+}
+
+async function ensureProfile(user) {
+  // upsert profile row in case trigger didn't fire yet
+  await supabase.from('profiles').upsert({
+    user_id: user.id,
+    email: user.email,
+  }, { onConflict: 'user_id', ignoreDuplicates: true });
+}
+
+// Shared study links cache — loaded once per session from Supabase
+let studyLinks = {}; // { [activityId]: { url, label } }
+
+async function fetchStudyLinks() {
+  if (!supabase) return;
+  const { data } = await supabase.from('study_links').select('activity_id, url, label');
+  if (data) {
+    studyLinks = {};
+    data.forEach(row => { studyLinks[row.activity_id] = { url: row.url, label: row.label }; });
+  }
+}
+
+async function saveStudyLink(activityId, url, label) {
+  if (!supabase || !currentUser) return;
+  await supabase.from('study_links').upsert({
+    activity_id: activityId,
+    url,
+    label: label || 'Abrir aula',
+    updated_by: currentUser.id,
+  }, { onConflict: 'activity_id' });
+  studyLinks[activityId] = { url, label };
+}
+
 let state = defaultState(); // placeholder until boot() resolves auth + data source
+let currentUserRole = 'user'; // 'user' | 'admin'
+let isAdmin = false;
 
 /* ---------------------------------------------------------
    3.2 AUTH SCREEN
@@ -387,20 +425,37 @@ function traduzErroAuth(msg) {
 async function startCloudSession(user) {
   currentUser = user;
   cloudMode = true;
+  await ensureProfile(user);
+  const profile = await fetchUserRole(user.id);
+  currentUserRole = profile.role || 'user';
+  isAdmin = currentUserRole === 'admin';
   state = await fetchOrCreateCloudState(user);
+  await fetchStudyLinks();
   showAuthScreen(false);
   setSyncStatus('synced');
-  saveState(); // caches locally too, for offline access
+  applyAdminUI();
+  saveState();
   finishBoot();
 }
 
 function startGuestSession() {
   currentUser = null;
   cloudMode = false;
+  isAdmin = false;
+  currentUserRole = 'user';
   state = loadLocalState();
   showAuthScreen(false);
   setSyncStatus('local');
+  applyAdminUI();
   finishBoot();
+}
+
+function applyAdminUI() {
+  // Show/hide admin nav item and badge
+  const adminNav = $('#adminNavItem');
+  if (adminNav) adminNav.style.display = isAdmin ? '' : 'none';
+  const adminBadge = $('#adminBadge');
+  if (adminBadge) adminBadge.style.display = isAdmin ? '' : 'none';
 }
 
 async function boot() {
@@ -551,13 +606,16 @@ const VIEW_META = {
   finance: ['Financeiro', 'Receitas, despesas e margem, sem letras miúdas.'],
   achievements: ['Conquistas', 'Cada marco do hobby ao negócio.'],
   settings: ['Configurações', 'Ajuste o app do seu jeito.'],
+  admin: ['Administração', 'Gerencie links das aulas e usuários.'],
 };
 
 function switchView(view) {
+  if (view === 'admin' && !isAdmin) return; // guard: non-admins can't reach admin view
   $$('.nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $$('.view').forEach(v => v.classList.toggle('is-active', v.id === `view-${view}`));
-  $('#viewTitle').textContent = VIEW_META[view][0];
-  $('#viewSubtitle').textContent = VIEW_META[view][1];
+  const meta = VIEW_META[view] || ['', ''];
+  $('#viewTitle').textContent = meta[0];
+  $('#viewSubtitle').textContent = meta[1];
   $('#viewScroll').scrollTop = 0;
   closeSidebar();
   renderView(view);
@@ -572,6 +630,7 @@ function renderView(view) {
   if (view === 'finance') renderFinance();
   if (view === 'achievements') renderAchievements();
   if (view === 'settings') renderSettings();
+  if (view === 'admin') renderAdmin();
 }
 
 $$('.nav-item').forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
@@ -830,17 +889,29 @@ function bindWeekEvents(week) {
     $('.act-check', actEl).onchange = e => finish(e.target.checked);
     $('.act-done', actEl).onclick = () => finish(!activity.done);
 
+    // Link button: admins edit, users just open
     $('.act-link', actEl).onclick = () => {
-      openModal('Editar link da aula', `
-        <div class="field"><label>URL do vídeo (YouTube)</label><input type="text" id="mLink" value="${escapeHtml(activity.link || '')}" placeholder="https://youtube.com/..."></div>
-      `, [
-        { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
-        { label: 'Salvar', cls: 'btn-primary', onClick: () => {
-          activity.link = $('#mLink').value.trim();
-          saveState(); closeModal();
-          if (activity.link) window.open(activity.link, '_blank');
-        }}
-      ]);
+      const shared = studyLinks[actId] || {};
+      const url = shared.url || activity.link || '';
+
+      if (isAdmin) {
+        openModal('Editar link da aula', `
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Este link ficará visível para todos os usuários.</p>
+          <div class="field"><label>URL do vídeo (YouTube)</label><input type="text" id="mLink" value="${escapeHtml(url)}" placeholder="https://youtube.com/..."></div>
+        `, [
+          { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+          { label: 'Salvar e abrir', cls: 'btn-primary', onClick: async () => {
+            const newUrl = $('#mLink').value.trim();
+            await saveStudyLink(actId, newUrl, 'Abrir aula');
+            activity.link = newUrl; saveState(); closeModal();
+            if (newUrl) window.open(newUrl, '_blank');
+            toast('Link salvo para todos os usuários.');
+          }}
+        ]);
+      } else {
+        if (url) { window.open(url, '_blank'); }
+        else { toast('Nenhum link disponível ainda para esta aula.'); }
+      }
     };
 
     const noteBox = $('.act-note', actEl);
@@ -1270,6 +1341,84 @@ function renderAchievements() {
 /* ---------------------------------------------------------
    17. SETTINGS
 --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   ADMIN VIEW
+--------------------------------------------------------- */
+async function renderAdmin() {
+  if (!isAdmin) return;
+
+  // ---- Links das aulas ----
+  const linksEl = $('#adminLinksContent');
+  linksEl.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Carregando…</p>';
+  await fetchStudyLinks();
+
+  let html = '';
+  state.study.weeks.forEach(w => {
+    w.activities.forEach(a => {
+      const shared = studyLinks[a.id] || {};
+      const url = shared.url || a.link || '';
+      html += `
+        <div class="link-editor-row">
+          <span class="week-tag">Sem ${w.weekNum}</span>
+          <span class="act-name">${escapeHtml(a.title)}</span>
+          <input type="text" class="admin-link-input" data-act="${a.id}"
+            value="${escapeHtml(url)}" placeholder="https://youtube.com/...">
+          <button class="btn-primary btn-sm link-save-btn" data-act="${a.id}">Salvar</button>
+        </div>`;
+    });
+  });
+  linksEl.innerHTML = html || '<p style="color:var(--text-faint);">Nenhuma atividade encontrada.</p>';
+
+  $$('.link-save-btn', linksEl).forEach(btn => {
+    btn.onclick = async () => {
+      const actId = btn.dataset.act;
+      const input = linksEl.querySelector(`.admin-link-input[data-act="${actId}"]`);
+      const url = input.value.trim();
+      btn.textContent = '…';
+      await saveStudyLink(actId, url, 'Abrir aula');
+      btn.textContent = 'Salvo ✓';
+      setTimeout(() => { btn.textContent = 'Salvar'; }, 1800);
+    };
+  });
+
+  // ---- Usuários ----
+  await renderUsersTable();
+  if ($('#refreshUsersBtn')) $('#refreshUsersBtn').onclick = renderUsersTable;
+}
+
+async function renderUsersTable() {
+  if (!supabase || !isAdmin) return;
+  const body = $('#usersTableBody');
+  body.innerHTML = '<tr><td colspan="4" style="color:var(--text-faint);">Carregando…</td></tr>';
+  const { data: users, error } = await supabase.from('profiles').select('user_id, email, name, role');
+  if (error || !users) { body.innerHTML = '<tr><td colspan="4" style="color:var(--danger);">Erro ao carregar usuários.</td></tr>'; return; }
+  body.innerHTML = users.map(u => `
+    <tr data-uid="${u.user_id}">
+      <td>${escapeHtml(u.email || '—')}</td>
+      <td>${escapeHtml(u.name || '—')}</td>
+      <td>
+        <select class="role-select" data-uid="${u.user_id}" style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;">
+          <option value="user" ${u.role==='user'?'selected':''}>Usuário</option>
+          <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+        </select>
+      </td>
+      <td><button class="btn-ghost btn-sm save-role-btn" data-uid="${u.user_id}">Salvar</button></td>
+    </tr>`).join('');
+
+  $$('.save-role-btn', body).forEach(btn => {
+    btn.onclick = async () => {
+      const uid = btn.dataset.uid;
+      const sel = body.querySelector(`.role-select[data-uid="${uid}"]`);
+      const newRole = sel.value;
+      btn.textContent = '…';
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('user_id', uid);
+      btn.textContent = error ? 'Erro' : 'Salvo ✓';
+      setTimeout(() => { btn.textContent = 'Salvar'; }, 1800);
+      if (!error) toast(`Papel de ${newRole} salvo.`);
+    };
+  });
+}
+
 function renderSettings() {
   $('#settingName').value = state.profile.name;
   $('#settingPhoto').value = state.profile.photo;
