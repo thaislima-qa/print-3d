@@ -69,6 +69,7 @@
       <button class="nav-item" data-view="finance"><span class="nav-ico">💰</span><span>Financeiro</span></button>
       <button class="nav-item" data-view="achievements"><span class="nav-ico">🏆</span><span>Conquistas</span></button>
       <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span><span>Configurações</span></button>
+      <button class="nav-item" data-view="admin" id="adminNavItem" style="display:none;"><span class="nav-ico">🛡</span><span>Administração</span><span class="admin-badge" id="adminBadge">Admin</span></button>
     </nav>
 
     <div class="sidebar-footer">
@@ -367,6 +368,27 @@
           <div class="settings-row settings-row--btns">
             <label>Reset</label>
             <button class="btn-danger" id="resetBtn">Resetar todos os dados</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ADMINISTRAÇÃO ============ -->
+      <section class="view" id="view-admin">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Links das aulas</h3>
+            <span class="panel-sub">Edite aqui — os links ficam visíveis para todos os usuários.</span>
+          </div>
+          <div id="adminLinksContent"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Usuários</h3><button class="btn-ghost btn-sm" id="refreshUsersBtn">Atualizar</button></div>
+          <div class="table-wrap">
+            <table class="data-table" id="usersTable">
+              <thead><tr><th>E-mail</th><th>Nome</th><th>Papel</th><th></th></tr></thead>
+              <tbody id="usersTableBody"></tbody>
+            </table>
           </div>
         </div>
       </section>
