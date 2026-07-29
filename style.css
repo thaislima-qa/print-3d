@@ -414,6 +414,25 @@ body::before{
 .filament-row button{ background:none; border:none; color: var(--text-faint); font-size:13px; }
 .filament-row button:hover{ color: var(--text); }
 
+/* Admin */
+.admin-badge{
+  font-size:9px; font-family: var(--font-mono); text-transform:uppercase; letter-spacing:.06em;
+  background: var(--accent); color:#0B0E13; padding:2px 7px; border-radius:999px; margin-left:auto;
+}
+.link-editor-row{
+  display:flex; align-items:center; gap:10px; padding:10px 0;
+  border-bottom:1px solid var(--border); flex-wrap:wrap;
+}
+.link-editor-row:last-child{ border-bottom:none; }
+.link-editor-row .week-tag{ font-size:10px; color:var(--text-faint); font-family:var(--font-mono); min-width:64px; }
+.link-editor-row .act-name{ font-size:13px; font-weight:600; flex:1; min-width:160px; }
+.link-editor-row input{
+  flex:2; min-width:180px; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:8px; padding:7px 10px; color:var(--text); font-size:12.5px;
+}
+.link-editor-row input:focus{ outline:none; border-color:var(--accent); }
+.link-save-btn{ padding:6px 12px; font-size:12px; }
+
 /* =========================== TOASTS =========================== */
 .toast-stack{ position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:200; }
 .toast{
