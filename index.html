@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Extrusa — Do hobby ao negócio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+</head>
+<body>
+
+<!-- ============ AUTH SCREEN ============ -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <div class="brand" style="padding:0 0 18px;">
+      <div class="brand-mark">
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+          <path d="M16 3 L28 9.5 V22.5 L16 29 L4 22.5 V9.5 Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M16 3 V16 M16 16 L28 9.5 M16 16 L4 9.5 M16 16 V29" stroke="currentColor" stroke-width="1.2" opacity=".55"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">Extrusa</span>
+        <span class="brand-tag">layer by layer</span>
+      </div>
+    </div>
+    <h2 id="authTitle">Entrar</h2>
+    <p class="auth-sub" id="authSub">Seus dados ficam salvos na nuvem e sincronizados entre dispositivos.</p>
+
+    <div class="field"><label>E-mail</label><input type="email" id="authEmail" autocomplete="email"></div>
+    <div class="field"><label>Senha</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <p class="auth-error" id="authError"></p>
+
+    <button class="btn-primary" id="authSubmitBtn" style="width:100%;margin-top:6px;">Entrar</button>
+    <button class="btn-ghost" id="authToggleBtn" style="width:100%;margin-top:8px;">Não tenho conta — criar uma</button>
+
+    <div class="auth-divider"><span>ou</span></div>
+    <button class="btn-ghost" id="authGuestBtn" style="width:100%;">Continuar sem conta (só neste aparelho)</button>
+  </div>
+</div>
+
+<div class="app-shell is-hidden" id="appShell">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+          <path d="M16 3 L28 9.5 V22.5 L16 29 L4 22.5 V9.5 Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M16 3 V16 M16 16 L28 9.5 M16 16 L4 9.5 M16 16 V29" stroke="currentColor" stroke-width="1.2" opacity=".55"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">Extrusa</span>
+        <span class="brand-tag">layer by layer</span>
+      </div>
+      <button class="sidebar-close" id="sidebarClose" aria-label="Fechar menu">✕</button>
+    </div>
+
+    <nav class="nav" id="mainNav">
+      <button class="nav-item is-active" data-view="dashboard"><span class="nav-ico">🏠</span><span>Dashboard</span></button>
+      <button class="nav-item" data-view="study"><span class="nav-ico">📚</span><span>Plano de Estudos</span></button>
+      <button class="nav-item" data-view="projects"><span class="nav-ico">🎯</span><span>Projetos</span></button>
+      <button class="nav-item" data-view="ideas"><span class="nav-ico">💡</span><span>Ideias</span></button>
+      <button class="nav-item" data-view="products"><span class="nav-ico">📦</span><span>Produtos</span></button>
+      <button class="nav-item" data-view="finance"><span class="nav-ico">💰</span><span>Financeiro</span></button>
+      <button class="nav-item" data-view="achievements"><span class="nav-ico">🏆</span><span>Conquistas</span></button>
+      <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span><span>Configurações</span></button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="mini-streak">
+        <span class="flame">🔥</span>
+        <div>
+          <strong id="sidebarStreak">0</strong>
+          <small>dias seguidos</small>
+        </div>
+      </div>
+      <button class="theme-toggle" id="themeToggle" title="Alternar tema">
+        <span id="themeIcon">🌙</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <header class="topbar">
+      <button class="hamburger" id="hamburger" aria-label="Abrir menu">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="topbar-title">
+        <h1 id="viewTitle">Dashboard</h1>
+        <p id="viewSubtitle">Sua evolução, camada por camada.</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="sync-pill" id="syncPill" title="Status de sincronização">
+          <span class="sync-dot" id="syncDot"></span>
+          <span id="syncLabel">local</span>
+        </div>
+        <div class="pomodoro-pill" id="pomodoroPill" title="Cronômetro Pomodoro">
+          <span class="pom-dot" id="pomDot"></span>
+          <span id="pomTime">25:00</span>
+        </div>
+        <div class="avatar" id="profileAvatar">T</div>
+      </div>
+    </header>
+
+    <div class="view-scroll" id="viewScroll">
+
+      <!-- ============ DASHBOARD ============ -->
+      <section class="view is-active" id="view-dashboard">
+
+        <div class="quote-widget" id="quoteWidget">
+          <span class="quote-eyebrow">Frase do dia</span>
+          <p id="quoteText">Toda peça perfeita começou com uma primeira camada torta.</p>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-icon">📈</div>
+            <div class="stat-value" id="statProgress">0%</div>
+            <div class="stat-label">Progresso geral</div>
+            <div class="printbar"><div class="printbar-fill" id="statProgressBar"></div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-value" id="statStreak">0</div>
+            <div class="stat-label">Dias consecutivos</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">⏱</div>
+            <div class="stat-value" id="statHours">0h</div>
+            <div class="stat-label">Horas estudadas</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-value" id="statProjects">0</div>
+            <div class="stat-label">Projetos concluídos</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🧩</div>
+            <div class="stat-value" id="statProductsMade">0</div>
+            <div class="stat-label">Produtos criados</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🛒</div>
+            <div class="stat-value" id="statProductsSold">0</div>
+            <div class="stat-label">Produtos vendidos</div>
+          </div>
+          <div class="stat-card stat-card--accent">
+            <div class="stat-icon">💰</div>
+            <div class="stat-value" id="statProfit">R$ 0</div>
+            <div class="stat-label">Lucro total</div>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="panel panel--chart">
+            <div class="panel-head">
+              <h3>Evolução</h3>
+              <span class="panel-sub">Horas estudadas • últimas 8 semanas</span>
+            </div>
+            <svg id="evoChart" viewBox="0 0 560 200" class="evo-chart"></svg>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Checklist do dia</h3>
+              <button class="btn-ghost btn-sm" id="addDailyTaskBtn">+ Tarefa</button>
+            </div>
+            <ul class="check-list" id="dailyChecklist"></ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Objetivos da semana</h3>
+              <button class="btn-ghost btn-sm" id="addWeeklyGoalBtn">+ Objetivo</button>
+            </div>
+            <ul class="check-list" id="weeklyGoals"></ul>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Objetivos do mês</h3>
+              <button class="btn-ghost btn-sm" id="addMonthlyGoalBtn">+ Objetivo</button>
+            </div>
+            <ul class="check-list" id="monthlyGoals"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PLANO DE ESTUDOS ============ -->
+      <section class="view" id="view-study">
+        <div class="panel study-overview">
+          <div class="study-progress-block">
+            <span class="panel-sub">Progresso geral do bootcamp</span>
+            <div class="printbar printbar--lg"><div class="printbar-fill" id="studyOverallBar"></div></div>
+            <strong id="studyOverallPct">0%</strong>
+          </div>
+        </div>
+        <div class="month-tabs" id="monthTabs"></div>
+        <div id="studyContent"></div>
+      </section>
+
+      <!-- ============ PROJETOS (KANBAN) ============ -->
+      <section class="view" id="view-projects">
+        <div class="view-toolbar">
+          <button class="btn-primary" id="addProjectBtn">+ Novo projeto</button>
+        </div>
+        <div class="kanban" id="kanbanBoard"></div>
+      </section>
+
+      <!-- ============ IDEIAS ============ -->
+      <section class="view" id="view-ideas">
+        <div class="view-toolbar">
+          <button class="btn-primary" id="addIdeaBtn">+ Nova ideia</button>
+        </div>
+        <div class="card-grid" id="ideasGrid"></div>
+      </section>
+
+      <!-- ============ PRODUTOS ============ -->
+      <section class="view" id="view-products">
+        <div class="view-toolbar">
+          <button class="btn-primary" id="addProductBtn">+ Novo produto</button>
+        </div>
+        <div class="card-grid" id="productsGrid"></div>
+      </section>
+
+      <!-- ============ FINANCEIRO ============ -->
+      <section class="view" id="view-finance">
+        <div class="stat-grid stat-grid--fin">
+          <div class="stat-card"><div class="stat-icon">📥</div><div class="stat-value" id="finRevenue">R$ 0</div><div class="stat-label">Receitas</div></div>
+          <div class="stat-card"><div class="stat-icon">📤</div><div class="stat-value" id="finExpense">R$ 0</div><div class="stat-label">Despesas</div></div>
+          <div class="stat-card stat-card--accent"><div class="stat-icon">💰</div><div class="stat-value" id="finProfit">R$ 0</div><div class="stat-label">Lucro</div></div>
+          <div class="stat-card"><div class="stat-icon">🏦</div><div class="stat-value" id="finInvestment">R$ 0</div><div class="stat-label">Investimento</div></div>
+          <div class="stat-card"><div class="stat-icon">🧵</div><div class="stat-value" id="finCostGram">R$ 0</div><div class="stat-label">Custo por grama</div></div>
+          <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value" id="finMargin">0%</div><div class="stat-label">Margem média</div></div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="panel panel--chart">
+            <div class="panel-head"><h3>Gráfico mensal</h3><span class="panel-sub">Receita x Despesa</span></div>
+            <svg id="finChart" viewBox="0 0 560 200" class="evo-chart"></svg>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Produtos mais lucrativos</h3></div>
+            <ul class="rank-list" id="topProducts"></ul>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Lançamentos</h3>
+            <div class="panel-actions">
+              <button class="btn-ghost btn-sm" id="addRevenueBtn">+ Receita</button>
+              <button class="btn-ghost btn-sm" id="addExpenseBtn">+ Despesa</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="financeTable">
+              <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
+              <tbody id="financeTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Configuração de custos</h3></div>
+          <p class="panel-sub" style="margin-bottom:6px;">Esses valores alimentam o cálculo automático de custo no cadastro de produtos.</p>
+          <div class="settings-row">
+            <label>Preço do filamento (R$/kg)</label>
+            <input type="number" id="filamentPriceInput" step="0.01">
+          </div>
+          <div class="settings-row">
+            <label>Preço da energia (R$/kWh)</label>
+            <input type="number" id="energyPriceInput" step="0.01">
+          </div>
+          <div class="settings-row">
+            <label>Potência média da impressora (W)</label>
+            <input type="number" id="printerPowerInput" step="1">
+          </div>
+          <div class="settings-row">
+            <label>Meta financeira</label>
+            <input type="number" id="financialGoalInput" step="1">
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ CONQUISTAS ============ -->
+      <section class="view" id="view-achievements">
+        <div class="ach-grid" id="achievementsGrid"></div>
+      </section>
+
+      <!-- ============ CONFIGURAÇÕES ============ -->
+      <section class="view" id="view-settings">
+        <div class="panel">
+          <div class="panel-head"><h3>Perfil</h3></div>
+          <div class="settings-row">
+            <label>Nome</label>
+            <input type="text" id="settingName">
+          </div>
+          <div class="settings-row">
+            <label>Foto (URL)</label>
+            <input type="text" id="settingPhoto" placeholder="https://...">
+          </div>
+          <div class="settings-row">
+            <label>Objetivo financeiro (R$)</label>
+            <input type="number" id="settingGoal">
+          </div>
+          <div class="settings-row">
+            <label>Horas de estudo por semana</label>
+            <input type="number" id="settingHours">
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Catálogo de filamentos</h3>
+            <button class="btn-ghost btn-sm" id="addFilamentBtn">+ Filamento</button>
+          </div>
+          <p class="panel-sub" style="margin-bottom:10px;">Cadastre cada rolo/tipo com seu preço real — o preço do filamento varia por marca, material e cor, então a calculadora de custo usa o filamento que você escolher em cada produto, não um valor único fixo.</p>
+          <ul class="filament-list" id="filamentList"></ul>
+        </div>
+
+        <div class="panel" id="accountPanel">
+          <div class="panel-head"><h3>Conta e sincronização</h3></div>
+          <div class="settings-row">
+            <label>Status</label>
+            <span id="accountStatus" style="font-size:13px;">—</span>
+          </div>
+          <div class="settings-row settings-row--btns">
+            <label>Ações</label>
+            <div class="btn-row">
+              <button class="btn-ghost" id="forceSyncBtn">Sincronizar agora</button>
+              <button class="btn-danger" id="logoutBtn">Sair da conta</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Aparência</h3></div>
+          <div class="settings-row settings-row--btns">
+            <label>Tema</label>
+            <div class="seg-control" id="themeSeg">
+              <button data-theme="light" class="seg-btn">☀ Claro</button>
+              <button data-theme="dark" class="seg-btn">🌙 Escuro</button>
+              <button data-theme="auto" class="seg-btn">🌓 Automático</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Dados</h3></div>
+          <div class="settings-row settings-row--btns">
+            <label>Backup</label>
+            <div class="btn-row">
+              <button class="btn-ghost" id="exportBtn">Exportar backup</button>
+              <button class="btn-ghost" id="importBtn">Importar backup</button>
+              <input type="file" id="importFile" accept="application/json" hidden>
+            </div>
+          </div>
+          <div class="settings-row settings-row--btns">
+            <label>Reset</label>
+            <button class="btn-danger" id="resetBtn">Resetar todos os dados</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ============ MODAL ============ -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">Título</h3>
+      <button class="modal-close" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<!-- ============ TOASTS ============ -->
+<div class="toast-stack" id="toastStack"></div>
+
+<!-- ============ ACHIEVEMENT POPUP ============ -->
+<div class="achieve-popup" id="achievePopup">
+  <div class="achieve-popup-icon" id="achievePopupIcon">🏆</div>
+  <div>
+    <strong>Conquista desbloqueada!</strong>
+    <p id="achievePopupText"></p>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
