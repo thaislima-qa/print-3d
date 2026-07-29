@@ -3,6 +3,14 @@
    Vanilla JS, zero deps. Everything persists to localStorage.
    ========================================================= */
 
+// Guard: if this file ever gets included twice on the same page
+// (e.g. a duplicate <script src="script.js"> tag), the second
+// execution stops here instead of crashing the whole app.
+if (window.__extrusaLoaded) {
+  console.warn('script.js já foi carregado nesta página — ignorando execução duplicada. Verifique se index.html tem <script src="script.js"> repetido.');
+} else {
+  window.__extrusaLoaded = true;
+(function () {
 'use strict';
 
 /* ---------------------------------------------------------
@@ -1447,3 +1455,5 @@ function finishBoot() {
   setInterval(applyTheme, 5 * 60 * 1000); // keep "auto" theme fresh
 }
 boot();
+})();
+}
