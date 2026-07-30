@@ -223,6 +223,12 @@ function defaultState() {
     filaments: [
       { id: uid(), name: 'PLA padrão', pricePerKg: 120 },
     ],
+    productCategories: [
+      { id: uid(), name: 'Home Office' },
+      { id: uid(), name: 'Casa' },
+      { id: uid(), name: 'Personalizado' },
+      { id: uid(), name: 'Acessórios 3D' },
+    ],
     achievements: buildAchievementSeed(),
     quoteIndex: Math.floor(Math.random() * QUOTES.length),
   };
@@ -269,6 +275,7 @@ function mergeWithDefaults(parsed) {
     study: parsed.study && parsed.study.weeks ? parsed.study : base.study,
     finance: { ...base.finance, ...(parsed.finance||{}) },
     filaments: parsed.filaments && parsed.filaments.length ? parsed.filaments : base.filaments,
+    productCategories: parsed.productCategories && parsed.productCategories.length ? parsed.productCategories : base.productCategories,
     achievements: parsed.achievements && parsed.achievements.length ? parsed.achievements : base.achievements,
   };
 }
@@ -1285,7 +1292,13 @@ function openProductModal(id) {
     <div class="field"><label>Nome</label><input type="text" id="prName" value="${escapeHtml(p.name)}"></div>
     <div class="field"><label>Imagem (URL)</label><input type="text" id="prImage" value="${escapeHtml(p.image)}" placeholder="https://..."></div>
     <div class="field-row">
-      <div class="field"><label>Categoria</label><input type="text" id="prCategory" value="${escapeHtml(p.category)}"></div>
+      <div class="field">
+        <label>Categoria</label>
+        <select id="prCategory">
+          <option value="">Sem categoria</option>
+          ${state.productCategories.map(c => `<option value="${escapeHtml(c.name)}" ${p.category===c.name?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+      </div>
       <div class="field"><label>Status</label>
         <select id="prStatus">
           <option value="rascunho" ${p.status==='rascunho'?'selected':''}>Rascunho</option>
@@ -1338,7 +1351,7 @@ function openProductModal(id) {
       // collect basic fields
       p.name = $('#prName').value.trim() || 'Sem nome';
       p.image = $('#prImage').value.trim();
-      p.category = $('#prCategory').value.trim();
+      p.category = $('#prCategory').value;
       p.status = $('#prStatus').value;
       p.price = Number($('#prPrice').value) || 0;
       p.cost = Number($('#prCost').value) || 0;
@@ -1429,59 +1442,122 @@ $('#addProductBtn').onclick = () => openProductModal(null);
 /* ---------------------------------------------------------
    15. FINANCE
 --------------------------------------------------------- */
+// Finance date filter state
+let finFilter = { from: '', to: '' };
+
+function applyFinFilter(entries) {
+  return entries.filter(e => {
+    if (finFilter.from && e.date < finFilter.from) return false;
+    if (finFilter.to && e.date > finFilter.to) return false;
+    return true;
+  });
+}
+
 function renderFinance() {
-  const t = computeTotals();
-  $('#finRevenue').textContent = brl(t.revenue);
-  $('#finExpense').textContent = brl(t.expense);
-  $('#finProfit').textContent = brl(t.profit);
-  $('#finInvestment').textContent = brl(state.finance.entries.filter(e=>/invest/i.test(e.desc)).reduce((s,e)=>s+Number(e.value||0),0));
+  const allEntries = state.finance.entries;
+  const filtered = applyFinFilter(allEntries);
+
+  const revenue = filtered.filter(e => e.type==='receita').reduce((s,e) => s+Number(e.value||0), 0);
+  const expense = filtered.filter(e => e.type==='despesa').reduce((s,e) => s+Number(e.value||0), 0);
+  const profit = revenue - expense;
+  const investment = filtered.filter(e => /invest/i.test(e.desc)).reduce((s,e) => s+Number(e.value||0), 0);
+
+  $('#finRevenue').textContent = brl(revenue);
+  $('#finExpense').textContent = brl(expense);
+  $('#finProfit').textContent = brl(profit);
+  $('#finInvestment').textContent = brl(investment);
   $('#finCostGram').textContent = brl((state.finance.filamentPrice || 0) / 1000);
 
   const margins = state.products.filter(p => p.price).map(p => (p.price - p.cost) / p.price);
   const avgMargin = margins.length ? Math.round((margins.reduce((a,b)=>a+b,0) / margins.length) * 100) : 0;
   $('#finMargin').textContent = avgMargin + '%';
 
-  $('#filamentPriceInput').value = state.finance.filamentPrice;
-  $('#energyPriceInput').value = state.finance.energyPrice;
-  $('#printerPowerInput').value = state.finance.printerPower;
-  $('#financialGoalInput').value = state.finance.goal;
+  // filter status label
+  const statusEl = $('#finFilterStatus');
+  if (statusEl) {
+    if (finFilter.from || finFilter.to) {
+      const from = finFilter.from ? fmtDate(finFilter.from) : '—';
+      const to = finFilter.to ? fmtDate(finFilter.to) : '—';
+      statusEl.textContent = `Período: ${from} até ${to} · ${filtered.length} lançamentos`;
+    } else {
+      statusEl.textContent = `${allEntries.length} lançamentos totais`;
+    }
+  }
 
-  // top products by profit
+  // top products
   const ranked = [...state.products].map(p => ({ name: p.name, profit: (p.price - p.cost) * (p.sold||0) }))
     .sort((a,b) => b.profit - a.profit).slice(0, 5);
   $('#topProducts').innerHTML = ranked.length ? ranked.map(r => `<li><span>${escapeHtml(r.name)}</span><strong>${brl(r.profit)}</strong></li>`).join('') :
     '<li style="color:var(--text-faint);">Cadastre produtos para ver o ranking.</li>';
 
-  // monthly chart (last 6 months, revenue vs expense net)
+  // monthly chart
   const months = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(); d.setMonth(d.getMonth() - i);
     months.push(d.toISOString().slice(0,7));
   }
   const netByMonth = months.map(m => {
-    const rev = state.finance.entries.filter(e => e.type==='receita' && e.date.startsWith(m)).reduce((s,e)=>s+Number(e.value||0),0);
-    const exp = state.finance.entries.filter(e => e.type==='despesa' && e.date.startsWith(m)).reduce((s,e)=>s+Number(e.value||0),0);
+    const rev = allEntries.filter(e => e.type==='receita' && e.date.startsWith(m)).reduce((s,e)=>s+Number(e.value||0),0);
+    const exp = allEntries.filter(e => e.type==='despesa' && e.date.startsWith(m)).reduce((s,e)=>s+Number(e.value||0),0);
     return rev - exp;
   });
   drawBarChart($('#finChart'), netByMonth, months.map(m => m.slice(5)));
 
-  // table
-  const body = $('#financeTableBody');
-  const sorted = [...state.finance.entries].sort((a,b) => b.date.localeCompare(a.date));
-  body.innerHTML = sorted.length ? sorted.map(e => `
+  // ---- Tabela de despesas ----
+  const expBody = $('#expenseTableBody');
+  const expenses = filtered.filter(e => e.type==='despesa').sort((a,b) => b.date.localeCompare(a.date));
+  expBody.innerHTML = expenses.length ? expenses.map(e => `
     <tr data-id="${e.id}">
       <td>${fmtDate(e.date)}</td>
-      <td>${e.type === 'receita' ? 'Receita' : 'Despesa'}</td>
       <td>${escapeHtml(e.desc)}</td>
-      <td class="${e.type==='receita'?'amount-pos':'amount-neg'}">${e.type==='receita'?'+':'-'}${brl(e.value)}</td>
+      <td class="amount-neg">-${brl(e.value)}</td>
       <td><button class="row-del" title="Remover">✕</button></td>
-    </tr>`).join('') : `<tr><td colspan="5" style="color:var(--text-faint);">Nenhum lançamento ainda.</td></tr>`;
-  $$('.row-del', body).forEach(btn => btn.onclick = e => {
+    </tr>`).join('') : `<tr><td colspan="4" style="color:var(--text-faint);">Nenhuma despesa no período.</td></tr>`;
+  $$('.row-del', expBody).forEach(btn => btn.onclick = e => {
+    const id = e.target.closest('tr').dataset.id;
+    state.finance.entries = state.finance.entries.filter(x => x.id !== id);
+    saveState(); renderFinance(); renderDashboard();
+  });
+
+  // ---- Tabela de vendas ----
+  const salesBody = $('#salesTableBody');
+  const sales = filtered.filter(e => e.type==='receita').sort((a,b) => b.date.localeCompare(a.date));
+  salesBody.innerHTML = sales.length ? sales.map(e => {
+    const qty = e.qty || 1;
+    const unit = e.unitValue || e.value;
+    return `
+    <tr data-id="${e.id}">
+      <td>${fmtDate(e.date)}</td>
+      <td>${escapeHtml(e.productName || e.desc)}</td>
+      <td style="font-family:var(--font-mono);">${qty}</td>
+      <td class="amount-pos">${brl(unit)}</td>
+      <td class="amount-pos"><strong>${brl(e.value)}</strong></td>
+      <td><button class="row-del" title="Remover">✕</button></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6" style="color:var(--text-faint);">Nenhuma venda no período.</td></tr>`;
+  $$('.row-del', salesBody).forEach(btn => btn.onclick = e => {
     const id = e.target.closest('tr').dataset.id;
     state.finance.entries = state.finance.entries.filter(x => x.id !== id);
     saveState(); renderFinance(); renderDashboard();
   });
 }
+
+// wire date filter buttons
+document.addEventListener('DOMContentLoaded', () => {
+  if ($('#finFilterBtn')) {
+    $('#finFilterBtn').onclick = () => {
+      finFilter.from = $('#finDateFrom').value;
+      finFilter.to = $('#finDateTo').value;
+      renderFinance();
+    };
+    $('#finClearBtn').onclick = () => {
+      finFilter = { from: '', to: '' };
+      $('#finDateFrom').value = '';
+      $('#finDateTo').value = '';
+      renderFinance();
+    };
+  }
+});
 
 function drawBarChart(svg, values, labels) {
   const w = 560, h = 200, pad = 26;
@@ -1500,29 +1576,102 @@ function drawBarChart(svg, values, labels) {
   svg.innerHTML = `<line x1="${pad}" y1="${zeroY}" x2="${w-pad}" y2="${zeroY}" stroke="var(--border)"/>${bars}`;
 }
 
-$('#addRevenueBtn').onclick = () => openFinanceEntryModal('receita');
-$('#addExpenseBtn').onclick = () => openFinanceEntryModal('despesa');
+$('#addExpenseBtn').onclick = () => openExpenseModal();
+$('#addSaleBtn').onclick = () => openSaleModal();
 
-function openFinanceEntryModal(type) {
-  openModal(type === 'receita' ? 'Nova receita' : 'Nova despesa', `
+function openExpenseModal() {
+  openModal('Nova despesa', `
     <div class="field"><label>Data</label><input type="date" id="fDate" value="${todayISO()}"></div>
-    <div class="field"><label>Descrição</label><input type="text" id="fDesc" placeholder="Ex: Venda chaveiro personalizado"></div>
-    <div class="field"><label>Valor (R$)</label><input type="number" step="0.01" id="fValue"></div>
+    <div class="field"><label>Descrição</label><input type="text" id="fDesc" placeholder="Ex: Bobina PLA Preto, energia elétrica…"></div>
+    <div class="field"><label>Valor (R$)</label><input type="number" step="0.01" id="fValue" min="0"></div>
   `, [
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
     { label: 'Adicionar', cls: 'btn-primary', onClick: () => {
       const value = Number($('#fValue').value) || 0;
-      const desc = $('#fDesc').value.trim() || (type === 'receita' ? 'Receita' : 'Despesa');
-      state.finance.entries.push({ id: uid(), date: $('#fDate').value || todayISO(), type, desc, value });
+      const desc = $('#fDesc').value.trim() || 'Despesa';
+      state.finance.entries.push({ id: uid(), date: $('#fDate').value || todayISO(), type: 'despesa', desc, value });
       saveState(); closeModal(); renderFinance(); renderDashboard();
+      toast('Despesa registrada.');
     }}
   ]);
 }
 
-$('#filamentPriceInput').addEventListener('change', e => { state.finance.filamentPrice = Number(e.target.value)||0; saveState(); renderFinance(); });
-$('#energyPriceInput').addEventListener('change', e => { state.finance.energyPrice = Number(e.target.value)||0; saveState(); renderFinance(); });
-$('#printerPowerInput').addEventListener('change', e => { state.finance.printerPower = Number(e.target.value)||0; saveState(); renderFinance(); });
-$('#financialGoalInput').addEventListener('change', e => { state.finance.goal = Number(e.target.value)||0; saveState(); });
+function openSaleModal() {
+  const productOptions = state.products.length
+    ? state.products.map(p => `<option value="${p.id}" data-price="${p.price}">${escapeHtml(p.name)} — ${brl(p.price)}</option>`).join('')
+    : '<option value="">Nenhum produto cadastrado</option>';
+
+  openModal('Nova venda', `
+    <div class="field"><label>Data</label><input type="date" id="sDate" value="${todayISO()}"></div>
+    <div class="field">
+      <label>Produto</label>
+      <select id="sProduct">
+        <option value="">Selecione…</option>
+        ${productOptions}
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Quantidade</label><input type="number" id="sQty" value="1" min="1"></div>
+      <div class="field"><label>Valor unitário (R$)</label><input type="number" step="0.01" id="sUnitValue" min="0"></div>
+    </div>
+    <div class="field">
+      <label>Total</label>
+      <input type="text" id="sTotal" readonly style="background:var(--surface-3);color:var(--accent);font-family:var(--font-mono);font-weight:700;">
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Registrar venda', cls: 'btn-primary', onClick: () => {
+      const productId = $('#sProduct').value;
+      const product = state.products.find(p => p.id === productId);
+      const qty = Math.max(1, Number($('#sQty').value) || 1);
+      const unitValue = Number($('#sUnitValue').value) || 0;
+      const total = qty * unitValue;
+      const date = $('#sDate').value || todayISO();
+
+      if (!productId) { toast('Selecione um produto.'); return; }
+      if (!unitValue) { toast('Informe o valor unitário.'); return; }
+
+      state.finance.entries.push({
+        id: uid(), date, type: 'receita',
+        desc: `Venda: ${product ? product.name : 'produto'} (${qty}x)`,
+        productName: product ? product.name : '',
+        productId, qty, unitValue, value: total,
+      });
+
+      // update sold count on the product
+      if (product) {
+        product.sold = (product.sold || 0) + qty;
+        if (cloudMode) upsertCloudProduct(product);
+      }
+
+      saveState(); closeModal(); renderFinance(); renderDashboard();
+      toast('Venda registrada.');
+    }}
+  ]);
+
+  // auto-fill unit price when product selected
+  setTimeout(() => {
+    const sel = $('#sProduct');
+    const qtyInput = $('#sQty');
+    const unitInput = $('#sUnitValue');
+    const totalInput = $('#sTotal');
+
+    const updateTotal = () => {
+      const qty = Number(qtyInput.value) || 1;
+      const unit = Number(unitInput.value) || 0;
+      totalInput.value = brl(qty * unit);
+    };
+
+    sel.onchange = () => {
+      const opt = sel.options[sel.selectedIndex];
+      const price = opt ? Number(opt.dataset.price) || 0 : 0;
+      unitInput.value = price.toFixed(2);
+      updateTotal();
+    };
+    qtyInput.oninput = updateTotal;
+    unitInput.oninput = updateTotal;
+  }, 50);
+}
 
 /* ---------------------------------------------------------
    16. ACHIEVEMENTS VIEW
@@ -1548,6 +1697,29 @@ function renderAchievements() {
 async function renderAdmin() {
   if (!isAdmin) return;
 
+  // ---- Categorias de produtos ----
+  renderCategoryList();
+  if ($('#addCategoryBtn')) {
+    $('#addCategoryBtn').onclick = () => openCategoryModal(null);
+  }
+
+  // ---- Configuração de custos (inputs já estão no HTML, só popular valores) ----
+  if ($('#filamentPriceInput')) {
+    $('#filamentPriceInput').value = state.finance.filamentPrice;
+    $('#energyPriceInput').value = state.finance.energyPrice;
+    $('#printerPowerInput').value = state.finance.printerPower;
+    $('#financialGoalInput').value = state.finance.goal;
+    // bind only once
+    if (!$('#filamentPriceInput').dataset.bound) {
+      $('#filamentPriceInput').dataset.bound = '1';
+      $('#filamentPriceInput').addEventListener('change', e => { state.finance.filamentPrice = Number(e.target.value)||0; saveState(); });
+      $('#energyPriceInput').addEventListener('change', e => { state.finance.energyPrice = Number(e.target.value)||0; saveState(); });
+      $('#printerPowerInput').addEventListener('change', e => { state.finance.printerPower = Number(e.target.value)||0; saveState(); });
+      $('#financialGoalInput').addEventListener('change', e => { state.finance.goal = Number(e.target.value)||0; saveState(); });
+    }
+  }
+
+  // ---- Material de apoio ----
   const linksEl = $('#adminLinksContent');
   linksEl.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Carregando…</p>';
   await fetchStudyMaterials();
@@ -1573,18 +1745,51 @@ async function renderAdmin() {
     });
   });
   linksEl.innerHTML = html || '<p style="color:var(--text-faint);">Nenhuma atividade encontrada.</p>';
-
   $$('.link-save-btn', linksEl).forEach(btn => {
-    btn.onclick = () => {
-      const actId = btn.dataset.act;
-      const actTitle = btn.dataset.title;
-      const mat = studyMaterials[actId] || {};
-      openMaterialEditor(actId, actTitle, mat);
-    };
+    btn.onclick = () => openMaterialEditor(btn.dataset.act, btn.dataset.title, studyMaterials[btn.dataset.act] || {});
   });
 
+  // ---- Usuários ----
   await renderUsersTable();
   if ($('#refreshUsersBtn')) $('#refreshUsersBtn').onclick = renderUsersTable;
+}
+
+function renderCategoryList() {
+  const el = $('#categoryList');
+  if (!el) return;
+  if (!state.productCategories.length) { el.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Nenhuma categoria cadastrada.</p>'; return; }
+  el.innerHTML = state.productCategories.map(c => `
+    <li class="filament-row" data-id="${c.id}">
+      <span class="fname">${escapeHtml(c.name)}</span>
+      <button class="cat-edit" title="Editar">✎</button>
+      <button class="cat-del" title="Remover">✕</button>
+    </li>`).join('');
+  $$('.cat-edit', el).forEach(btn => btn.onclick = e => openCategoryModal(e.target.closest('.filament-row').dataset.id));
+  $$('.cat-del', el).forEach(btn => btn.onclick = e => {
+    const id = e.target.closest('.filament-row').dataset.id;
+    state.productCategories = state.productCategories.filter(x => x.id !== id);
+    saveState(); renderCategoryList();
+  });
+}
+
+function openCategoryModal(id) {
+  const c = id ? state.productCategories.find(x => x.id === id) : { id: uid(), name: '' };
+  const isNew = !id;
+  openModal(isNew ? 'Nova categoria' : 'Editar categoria', `
+    <div class="field"><label>Nome da categoria</label><input type="text" id="catName" value="${escapeHtml(c.name)}" placeholder="Ex: Organização, Decoração…"></div>
+  `, [
+    ...(isNew ? [] : [{ label: 'Excluir', cls: 'btn-danger', onClick: () => {
+      state.productCategories = state.productCategories.filter(x => x.id !== id);
+      saveState(); closeModal(); renderCategoryList();
+    }}]),
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Salvar', cls: 'btn-primary', onClick: () => {
+      c.name = $('#catName').value.trim() || 'Sem nome';
+      if (isNew) state.productCategories.push(c);
+      saveState(); closeModal(); renderCategoryList();
+      toast(isNew ? 'Categoria criada.' : 'Categoria atualizada.');
+    }}
+  ]);
 }
 
 async function renderUsersTable() {
