@@ -243,6 +243,21 @@
           <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value" id="finMargin">0%</div><div class="stat-label">Margem média</div></div>
         </div>
 
+        <!-- Filtro de datas -->
+        <div class="panel fin-filter-bar">
+          <div class="fin-filter-group">
+            <label>De</label>
+            <input type="date" id="finDateFrom">
+          </div>
+          <div class="fin-filter-group">
+            <label>Até</label>
+            <input type="date" id="finDateTo">
+          </div>
+          <button class="btn-ghost btn-sm" id="finFilterBtn">Filtrar</button>
+          <button class="btn-ghost btn-sm" id="finClearBtn">Limpar filtro</button>
+          <span class="panel-sub" id="finFilterStatus" style="margin-left:auto;"></span>
+        </div>
+
         <div class="dash-grid">
           <div class="panel panel--chart">
             <div class="panel-head"><h3>Gráfico mensal</h3><span class="panel-sub">Receita x Despesa</span></div>
@@ -254,40 +269,31 @@
           </div>
         </div>
 
+        <!-- Bloco: Lançamento de Despesas -->
         <div class="panel">
           <div class="panel-head">
-            <h3>Lançamentos</h3>
-            <div class="panel-actions">
-              <button class="btn-ghost btn-sm" id="addRevenueBtn">+ Receita</button>
-              <button class="btn-ghost btn-sm" id="addExpenseBtn">+ Despesa</button>
-            </div>
+            <h3>Lançamento de Despesas</h3>
+            <button class="btn-ghost btn-sm" id="addExpenseBtn">+ Despesa</button>
           </div>
           <div class="table-wrap">
-            <table class="data-table" id="financeTable">
-              <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
-              <tbody id="financeTableBody"></tbody>
+            <table class="data-table">
+              <thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
+              <tbody id="expenseTableBody"></tbody>
             </table>
           </div>
         </div>
 
+        <!-- Bloco: Vendas -->
         <div class="panel">
-          <div class="panel-head"><h3>Configuração de custos</h3></div>
-          <p class="panel-sub" style="margin-bottom:6px;">Esses valores alimentam o cálculo automático de custo no cadastro de produtos.</p>
-          <div class="settings-row">
-            <label>Preço do filamento (R$/kg)</label>
-            <input type="number" id="filamentPriceInput" step="0.01">
+          <div class="panel-head">
+            <h3>Vendas</h3>
+            <button class="btn-ghost btn-sm" id="addSaleBtn">+ Venda</button>
           </div>
-          <div class="settings-row">
-            <label>Preço da energia (R$/kWh)</label>
-            <input type="number" id="energyPriceInput" step="0.01">
-          </div>
-          <div class="settings-row">
-            <label>Potência média da impressora (W)</label>
-            <input type="number" id="printerPowerInput" step="1">
-          </div>
-          <div class="settings-row">
-            <label>Meta financeira</label>
-            <input type="number" id="financialGoalInput" step="1">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Data</th><th>Produto</th><th>Qtd</th><th>Valor unit.</th><th>Total</th><th></th></tr></thead>
+              <tbody id="salesTableBody"></tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -374,14 +380,49 @@
 
       <!-- ============ ADMINISTRAÇÃO ============ -->
       <section class="view" id="view-admin">
+
+        <!-- Categorias de produtos -->
         <div class="panel">
           <div class="panel-head">
-            <h3>Links das aulas</h3>
-            <span class="panel-sub">Edite aqui — os links ficam visíveis para todos os usuários.</span>
+            <h3>Categorias de produtos</h3>
+            <button class="btn-ghost btn-sm" id="addCategoryBtn">+ Categoria</button>
+          </div>
+          <p class="panel-sub" style="margin-bottom:10px;">As categorias aparecem como opções no cadastro de produtos.</p>
+          <ul class="filament-list" id="categoryList"></ul>
+        </div>
+
+        <!-- Configuração de custos -->
+        <div class="panel">
+          <div class="panel-head"><h3>Configuração de custos</h3></div>
+          <p class="panel-sub" style="margin-bottom:6px;">Alimenta o cálculo automático de custo no cadastro de produtos.</p>
+          <div class="settings-row">
+            <label>Preço do filamento padrão (R$/kg)</label>
+            <input type="number" id="filamentPriceInput" step="0.01">
+          </div>
+          <div class="settings-row">
+            <label>Preço da energia (R$/kWh)</label>
+            <input type="number" id="energyPriceInput" step="0.01">
+          </div>
+          <div class="settings-row">
+            <label>Potência média da impressora (W)</label>
+            <input type="number" id="printerPowerInput" step="1">
+          </div>
+          <div class="settings-row">
+            <label>Meta financeira (R$)</label>
+            <input type="number" id="financialGoalInput" step="1">
+          </div>
+        </div>
+
+        <!-- Material de apoio das aulas -->
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Material de apoio das aulas</h3>
+            <span class="panel-sub">Edite aqui — visível para todos os usuários.</span>
           </div>
           <div id="adminLinksContent"></div>
         </div>
 
+        <!-- Usuários -->
         <div class="panel">
           <div class="panel-head"><h3>Usuários</h3><button class="btn-ghost btn-sm" id="refreshUsersBtn">Atualizar</button></div>
           <div class="table-wrap">
