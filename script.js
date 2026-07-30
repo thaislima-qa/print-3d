@@ -333,26 +333,86 @@ async function ensureProfile(user) {
 }
 
 // Shared study links cache — loaded once per session from Supabase
-let studyLinks = {}; // { [activityId]: { url, label } }
+// Study materials cache { [activityId]: { video_url, pdf_url, pdf_name } }
+let studyMaterials = {};
 
-async function fetchStudyLinks() {
+async function fetchStudyMaterials() {
   if (!supabase) return;
-  const { data } = await supabase.from('study_links').select('activity_id, url, label');
+  const { data } = await supabase.from('study_materials').select('activity_id, video_url, pdf_url, pdf_name');
   if (data) {
-    studyLinks = {};
-    data.forEach(row => { studyLinks[row.activity_id] = { url: row.url, label: row.label }; });
+    studyMaterials = {};
+    data.forEach(r => { studyMaterials[r.activity_id] = { video_url: r.video_url, pdf_url: r.pdf_url, pdf_name: r.pdf_name }; });
   }
 }
 
-async function saveStudyLink(activityId, url, label) {
+async function saveStudyMaterial(activityId, { video_url = '', pdf_url = '', pdf_name = '' }) {
   if (!supabase || !currentUser) return;
-  await supabase.from('study_links').upsert({
-    activity_id: activityId,
-    url,
-    label: label || 'Abrir aula',
+  await supabase.from('study_materials').upsert({
+    activity_id: activityId, video_url, pdf_url, pdf_name,
     updated_by: currentUser.id,
   }, { onConflict: 'activity_id' });
-  studyLinks[activityId] = { url, label };
+  studyMaterials[activityId] = { video_url, pdf_url, pdf_name };
+}
+
+async function uploadToStorage(bucket, path, file) {
+  if (!supabase) return null;
+  const { data, error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+  if (error) { console.error('Upload error:', error); return null; }
+  const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(data.path);
+  return { path: data.path, publicUrl: urlData.publicUrl };
+}
+
+async function deleteFromStorage(bucket, path) {
+  if (!supabase || !path) return;
+  await supabase.storage.from(bucket).remove([path]);
+}
+
+// Products Supabase layer
+// If cloudMode: reads/writes to `products` table
+// If guest: falls back to state.products (localStorage)
+
+async function fetchCloudProducts() {
+  if (!supabase || !currentUser) return null;
+  const { data, error } = await supabase.from('products').select('*').eq('user_id', currentUser.id);
+  if (error) { console.error('Erro ao buscar produtos:', error); return null; }
+  return data;
+}
+
+async function upsertCloudProduct(p) {
+  if (!supabase || !currentUser) return;
+  const row = productToRow(p);
+  const { error } = await supabase.from('products').upsert(row, { onConflict: 'id' });
+  if (error) console.error('Erro ao salvar produto:', error);
+}
+
+async function deleteCloudProduct(id) {
+  if (!supabase || !currentUser) return;
+  await supabase.from('products').delete().eq('id', id).eq('user_id', currentUser.id);
+}
+
+function productToRow(p) {
+  return {
+    id: p.id, user_id: currentUser.id,
+    name: p.name || '', category: p.category || '', status: p.status || 'rascunho',
+    price: Number(p.price) || 0, cost: Number(p.cost) || 0,
+    weight_g: Number(p.weight) || 0, print_time: p.printTime || '',
+    sold: Number(p.sold) || 0, image_url: p.image || '',
+    project_file_url: p.projectFileUrl || '', project_file_name: p.projectFileName || '',
+    extra_cost: Number(p.extraCost) || 0,
+    filament_id: p.filamentId || '', filament_price_override: Number(p.filamentPriceOverride) || 0,
+    notes: p.notes || '',
+  };
+}
+
+function rowToProduct(r) {
+  return {
+    id: r.id, name: r.name, category: r.category, status: r.status,
+    price: Number(r.price), cost: Number(r.cost), weight: Number(r.weight_g),
+    printTime: r.print_time, sold: Number(r.sold), image: r.image_url,
+    projectFileUrl: r.project_file_url, projectFileName: r.project_file_name,
+    extraCost: Number(r.extra_cost), filamentId: r.filament_id,
+    filamentPriceOverride: Number(r.filament_price_override), notes: r.notes,
+  };
 }
 
 let state = defaultState(); // placeholder until boot() resolves auth + data source
@@ -430,7 +490,10 @@ async function startCloudSession(user) {
   currentUserRole = profile.role || 'user';
   isAdmin = currentUserRole === 'admin';
   state = await fetchOrCreateCloudState(user);
-  await fetchStudyLinks();
+  // Load cloud products into state.products
+  const cloudProds = await fetchCloudProducts();
+  if (cloudProds) state.products = cloudProds.map(rowToProduct);
+  await fetchStudyMaterials();
   showAuthScreen(false);
   setSyncStatus('synced');
   applyAdminUI();
@@ -847,6 +910,13 @@ const DIFF_LABEL = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil' };
 const PRIO_LABEL = { alta: 'Prioridade alta', media: 'Prioridade média', baixa: 'Prioridade baixa' };
 
 function activityHtml(weekId, a) {
+  const mat = studyMaterials[a.id] || {};
+  const hasMaterial = !!(mat.video_url || mat.pdf_url);
+  const materialBtn = (hasMaterial || isAdmin)
+    ? `<button class="link-btn act-material ${hasMaterial ? '' : 'act-material--empty'}" style="${hasMaterial ? '' : 'opacity:.45;'}">
+        ${hasMaterial ? '📂 Material de apoio' : (isAdmin ? '📂 Adicionar material' : '')}
+       </button>`
+    : '';
   return `
     <div class="activity ${a.done ? 'is-done' : ''}" data-week="${weekId}" data-act="${a.id}">
       <div class="activity-top">
@@ -860,7 +930,7 @@ function activityHtml(weekId, a) {
             <span class="tag tag--prio-${a.priority}">${PRIO_LABEL[a.priority]}</span>
           </div>
           <div class="activity-actions">
-            <button class="link-btn act-link">▶ Abrir aula</button>
+            ${materialBtn}
             <button class="btn-ghost btn-sm act-note-toggle">Observações</button>
             <button class="btn-primary btn-sm act-done">${a.done ? 'Concluído ✓' : 'Marcar concluído'}</button>
           </div>
@@ -889,30 +959,15 @@ function bindWeekEvents(week) {
     $('.act-check', actEl).onchange = e => finish(e.target.checked);
     $('.act-done', actEl).onclick = () => finish(!activity.done);
 
-    // Link button: admins edit, users just open
-    $('.act-link', actEl).onclick = () => {
-      const shared = studyLinks[actId] || {};
-      const url = shared.url || activity.link || '';
-
-      if (isAdmin) {
-        openModal('Editar link da aula', `
-          <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Este link ficará visível para todos os usuários.</p>
-          <div class="field"><label>URL do vídeo (YouTube)</label><input type="text" id="mLink" value="${escapeHtml(url)}" placeholder="https://youtube.com/..."></div>
-        `, [
-          { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
-          { label: 'Salvar e abrir', cls: 'btn-primary', onClick: async () => {
-            const newUrl = $('#mLink').value.trim();
-            await saveStudyLink(actId, newUrl, 'Abrir aula');
-            activity.link = newUrl; saveState(); closeModal();
-            if (newUrl) window.open(newUrl, '_blank');
-            toast('Link salvo para todos os usuários.');
-          }}
-        ]);
-      } else {
-        if (url) { window.open(url, '_blank'); }
-        else { toast('Nenhum link disponível ainda para esta aula.'); }
-      }
-    };
+    // Material de apoio: admin edita, usuário visualiza
+    const matBtn = $('.act-material', actEl);
+    if (matBtn) {
+      matBtn.onclick = () => {
+        const mat = studyMaterials[actId] || {};
+        if (isAdmin) openMaterialEditor(actId, activity.title, mat);
+        else openMaterialViewer(activity.title, mat);
+      };
+    }
 
     const noteBox = $('.act-note', actEl);
     $('.act-note-toggle', actEl).onclick = () => {
@@ -920,6 +975,89 @@ function bindWeekEvents(week) {
     };
     noteBox.onblur = () => { activity.notes = noteBox.value; saveState(); };
   });
+}
+
+// Admin: edita vídeo + faz upload de PDF
+function openMaterialEditor(actId, actTitle, mat) {
+  openModal(`Material — ${escapeHtml(actTitle)}`, `
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:2px;">Visível para todos os usuários.</p>
+    <div class="field">
+      <label>URL do vídeo (YouTube, Vimeo, Drive…)</label>
+      <input type="text" id="matVideo" value="${escapeHtml(mat.video_url || '')}" placeholder="https://youtube.com/watch?v=...">
+    </div>
+    <div class="field">
+      <label>PDF de apoio</label>
+      ${mat.pdf_url ? `<div class="mat-current-file">📄 <a href="${escapeHtml(mat.pdf_url)}" target="_blank">${escapeHtml(mat.pdf_name || 'Arquivo atual')}</a> <button class="btn-ghost btn-sm" id="matRemovePdf">Remover</button></div>` : ''}
+      <input type="file" id="matPdfFile" accept="application/pdf" style="margin-top:6px;">
+      <span class="field-hint">Máx. 20 MB. Deixe vazio para manter o arquivo atual.</span>
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Salvar', cls: 'btn-primary', onClick: async () => {
+      const videoUrl = $('#matVideo').value.trim();
+      let pdfUrl = mat.pdf_url || '';
+      let pdfName = mat.pdf_name || '';
+      const fileInput = $('#matPdfFile');
+
+      // handle remove
+      const removeBtn = $('#matRemovePdf');
+      if (removeBtn && removeBtn.dataset.remove === 'true') {
+        await deleteFromStorage('materials', mat.pdf_path || '');
+        pdfUrl = ''; pdfName = '';
+      }
+
+      // handle new upload
+      if (fileInput && fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        if (file.size > 20 * 1024 * 1024) { toast('PDF muito grande — máx. 20 MB.'); return; }
+        toast('Enviando PDF...');
+        const path = `${actId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const result = await uploadToStorage('materials', path, file);
+        if (!result) { toast('Erro no upload. Tente novamente.'); return; }
+        pdfUrl = result.publicUrl;
+        pdfName = file.name;
+      }
+
+      await saveStudyMaterial(actId, { video_url: videoUrl, pdf_url: pdfUrl, pdf_name: pdfName });
+      closeModal();
+      renderStudy();
+      toast('Material salvo para todos os usuários.');
+    }}
+  ]);
+
+  // wire up remove button after modal renders
+  setTimeout(() => {
+    const btn = $('#matRemovePdf');
+    if (btn) btn.onclick = () => { btn.dataset.remove = 'true'; btn.textContent = '✕ Removido'; btn.disabled = true; };
+  }, 50);
+}
+
+// Usuário: visualiza o material disponível
+function openMaterialViewer(actTitle, mat) {
+  const videoId = extractYouTubeId(mat.video_url || '');
+  const embedHtml = videoId
+    ? `<div class="video-embed-wrap"><iframe src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen></iframe></div>`
+    : mat.video_url
+      ? `<a class="btn-ghost" href="${escapeHtml(mat.video_url)}" target="_blank" style="display:inline-flex;gap:8px;align-items:center;">▶ Abrir vídeo</a>`
+      : '';
+
+  const pdfHtml = mat.pdf_url
+    ? `<a class="btn-ghost" href="${escapeHtml(mat.pdf_url)}" target="_blank" style="display:inline-flex;gap:8px;align-items:center;">📄 ${escapeHtml(mat.pdf_name || 'Baixar PDF')}</a>`
+    : '';
+
+  openModal(`📂 ${escapeHtml(actTitle)}`, `
+    ${embedHtml}
+    ${pdfHtml ? `<div style="margin-top:${embedHtml ? '14px' : '0'}">${pdfHtml}</div>` : ''}
+    ${!embedHtml && !pdfHtml ? '<p style="color:var(--text-faint);font-size:13px;">Nenhum material disponível ainda.</p>' : ''}
+  `, [
+    { label: 'Fechar', cls: 'btn-ghost', onClick: closeModal },
+  ]);
+}
+
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
 }
 
 /* ---------------------------------------------------------
@@ -1103,6 +1241,9 @@ function renderProducts() {
   grid.innerHTML = state.products.map(p => {
     const margin = p.price ? Math.round(((p.price - p.cost) / p.price) * 100) : 0;
     const profit = (p.price - p.cost) * (p.sold || 0);
+    const fileBtn = p.projectFileUrl
+      ? `<a class="btn-ghost btn-sm" href="${escapeHtml(p.projectFileUrl)}" target="_blank" download title="Baixar arquivo do projeto">📎 Projeto</a>`
+      : '';
     return `
     <div class="item-card" data-id="${p.id}">
       ${p.image ? `<img src="${escapeHtml(p.image)}" alt="">` : ''}
@@ -1114,7 +1255,10 @@ function renderProducts() {
         <span class="tag tag--time">${p.sold || 0} vendidos</span>
         <span class="tag tag--time">lucro ${brl(profit)}</span>
       </div>
-      <div class="card-actions"><button class="btn-ghost btn-sm prod-edit">Editar</button></div>
+      <div class="card-actions">
+        <button class="btn-ghost btn-sm prod-edit">Editar</button>
+        ${fileBtn}
+      </div>
     </div>`;
   }).join('');
   $$('.prod-edit', grid).forEach(btn => btn.onclick = e => openProductModal(e.target.closest('.item-card').dataset.id));
@@ -1122,11 +1266,24 @@ function renderProducts() {
 function statusLabel(s) { return { rascunho: 'Rascunho', teste: 'Em teste', publicado: 'Publicado' }[s] || s; }
 
 function openProductModal(id) {
-  const p = id ? state.products.find(x => x.id === id) : { id: uid(), name:'', category:'', price:0, cost:0, weight:0, printTime:'', sold:0, image:'', status:'rascunho' };
+  const p = id ? state.products.find(x => x.id === id) : {
+    id: uid(), name:'', category:'', price:0, cost:0, weight:0, printTime:'',
+    sold:0, image:'', status:'rascunho', projectFileUrl:'', projectFileName:'',
+    extraCost:0, filamentId:null, filamentPriceOverride:0, notes:''
+  };
   const isNew = !id;
+
+  const filamentOptions = state.filaments.map(f =>
+    `<option value="${f.id}" ${p.filamentId===f.id?'selected':''}>${escapeHtml(f.name)} — ${brl(f.pricePerKg)}/kg</option>`
+  ).join('');
+
+  const currentFile = p.projectFileUrl
+    ? `<div class="mat-current-file">📎 <a href="${escapeHtml(p.projectFileUrl)}" target="_blank">${escapeHtml(p.projectFileName || 'Arquivo atual')}</a> <button class="btn-ghost btn-sm" id="prRemoveFile">Remover</button></div>`
+    : '';
+
   openModal(isNew ? 'Novo produto' : 'Editar produto', `
     <div class="field"><label>Nome</label><input type="text" id="prName" value="${escapeHtml(p.name)}"></div>
-    <div class="field"><label>Imagem (URL)</label><input type="text" id="prImage" value="${escapeHtml(p.image)}"></div>
+    <div class="field"><label>Imagem (URL)</label><input type="text" id="prImage" value="${escapeHtml(p.image)}" placeholder="https://..."></div>
     <div class="field-row">
       <div class="field"><label>Categoria</label><input type="text" id="prCategory" value="${escapeHtml(p.category)}"></div>
       <div class="field"><label>Status</label>
@@ -1149,8 +1306,8 @@ function openProductModal(id) {
       <div class="field">
         <label>Filamento usado</label>
         <select id="prFilamentSelect">
-          ${state.filaments.map(f => `<option value="${f.id}" ${p.filamentId===f.id?'selected':''}>${escapeHtml(f.name)} — ${brl(f.pricePerKg)}/kg</option>`).join('')}
-          <option value="__custom" ${!p.filamentId?'selected':''}>Preço manual (kg)</option>
+          ${filamentOptions}
+          <option value="__custom" ${!p.filamentId?'selected':''}>Preço manual</option>
         </select>
       </div>
       <div class="field"><label>Preço do filamento (R$/kg)</label><input type="number" step="0.01" id="prFilamentPrice" value="${p.filamentPriceOverride || state.finance.filamentPrice || 0}"></div>
@@ -1161,10 +1318,24 @@ function openProductModal(id) {
       <p class="cost-calc-breakdown" id="prCostBreakdown"></p>
     </div>
     <div class="field"><label>Quantidade vendida</label><input type="number" id="prSold" value="${p.sold}"></div>
+    <div class="field">
+      <label>Arquivo do projeto (.3mf, .stl, .f3d, .step…)</label>
+      ${currentFile}
+      <input type="file" id="prProjectFile" accept=".3mf,.stl,.f3d,.step,.stp,.obj,.zip" style="margin-top:6px;">
+      <span class="field-hint">Máx. 50 MB. ${cloudMode ? 'Salvo no Supabase Storage.' : 'Disponível apenas no modo nuvem.'}</span>
+    </div>
+    <div class="field"><label>Observações</label><textarea id="prNotes">${escapeHtml(p.notes||'')}</textarea></div>
   `, [
-    ...(isNew ? [] : [{ label: 'Excluir', cls: 'btn-danger', onClick: () => { state.products = state.products.filter(x=>x.id!==id); saveState(); closeModal(); renderProducts(); renderDashboard(); }}]),
+    ...(isNew ? [] : [{ label: 'Excluir', cls: 'btn-danger', onClick: async () => {
+      if (p.projectFileUrl && cloudMode) await deleteFromStorage('products', p.projectFileName);
+      state.products = state.products.filter(x => x.id !== id);
+      if (cloudMode) await deleteCloudProduct(id);
+      saveState(); closeModal(); renderProducts(); renderDashboard();
+      toast('Produto removido.');
+    }}]),
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
-    { label: 'Salvar', cls: 'btn-primary', onClick: () => {
+    { label: 'Salvar', cls: 'btn-primary', onClick: async () => {
+      // collect basic fields
       p.name = $('#prName').value.trim() || 'Sem nome';
       p.image = $('#prImage').value.trim();
       p.category = $('#prCategory').value.trim();
@@ -1177,18 +1348,52 @@ function openProductModal(id) {
       p.filamentId = filSel === '__custom' ? null : filSel;
       p.filamentPriceOverride = Number($('#prFilamentPrice').value) || 0;
       p.extraCost = Number($('#prExtraCost').value) || 0;
+      p.notes = $('#prNotes').value.trim();
       const prevSold = p.sold || 0;
       p.sold = Number($('#prSold').value) || 0;
-      if (isNew) state.products.push(p);
-      // auto-log revenue diff as a finance entry when sold count increases
+
+      // handle file remove
+      const removeBtn = $('#prRemoveFile');
+      if (removeBtn && removeBtn.dataset.remove === 'true' && cloudMode) {
+        await deleteFromStorage('products', p.projectFileUrl);
+        p.projectFileUrl = ''; p.projectFileName = '';
+      }
+
+      // handle file upload
+      const fileInput = $('#prProjectFile');
+      if (fileInput && fileInput.files.length > 0 && cloudMode) {
+        const file = fileInput.files[0];
+        if (file.size > 50 * 1024 * 1024) { toast('Arquivo muito grande — máx. 50 MB.'); return; }
+        toast('Enviando arquivo do projeto...');
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `${currentUser.id}/${p.id}_${safeName}`;
+        const result = await uploadToStorage('products', path, file);
+        if (!result) { toast('Erro no upload. Tente novamente.'); return; }
+        p.projectFileUrl = result.publicUrl;
+        p.projectFileName = file.name;
+      } else if (fileInput && fileInput.files.length > 0 && !cloudMode) {
+        toast('Login necessário para salvar arquivos na nuvem.');
+      }
+
+      // auto-log revenue on new sales
       if (p.sold > prevSold) {
         const diff = p.sold - prevSold;
         state.finance.entries.push({ id: uid(), date: todayISO(), type: 'receita', desc: `Venda: ${p.name} (${diff}x)`, value: diff * p.price });
       }
+
+      if (isNew) state.products.push(p);
+      else { const idx = state.products.findIndex(x => x.id === p.id); if (idx >= 0) state.products[idx] = p; }
+
+      if (cloudMode) await upsertCloudProduct(p);
       saveState(); closeModal(); renderProducts(); renderDashboard();
       toast(isNew ? 'Produto criado.' : 'Produto atualizado.');
     }}
   ]);
+
+  setTimeout(() => {
+    const removeBtn = $('#prRemoveFile');
+    if (removeBtn) removeBtn.onclick = () => { removeBtn.dataset.remove = 'true'; removeBtn.textContent = '✕ Removido'; removeBtn.disabled = true; };
+  }, 50);
 
   $('#prFilamentSelect').onchange = e => {
     if (e.target.value === '__custom') return;
@@ -1202,24 +1407,20 @@ function openProductModal(id) {
     const extra = Number($('#prExtraCost').value) || 0;
     const filamentPriceKg = Number($('#prFilamentPrice').value) || 0;
     const hours = parseTimeToHours(printTimeStr);
-
     if (!weightG && !hours) {
       $('#prCostBreakdown').innerHTML = '<span class="cost-calc-warn">Preencha ao menos o peso (g) ou o tempo de impressão para calcular.</span>';
       return;
     }
-
-    const filamentPricePerGram = filamentPriceKg / 1000;
-    const filamentCost = weightG * filamentPricePerGram;
+    const filamentCost = weightG * (filamentPriceKg / 1000);
     const powerKW = (state.finance.printerPower || 0) / 1000;
     const energyCost = hours * powerKW * (state.finance.energyPrice || 0);
     const total = filamentCost + energyCost + extra;
-
     $('#prCost').value = total.toFixed(2);
     $('#prCostBreakdown').innerHTML = `
-      Filamento: <strong>${brl(filamentCost)}</strong> (${weightG}g × ${brl(filamentPricePerGram)}/g)<br>
-      Energia: <strong>${brl(energyCost)}</strong> (${hours.toFixed(2)}h × ${state.finance.printerPower || 0}W × ${brl(state.finance.energyPrice||0)}/kWh)<br>
-      Custos extras: <strong>${brl(extra)}</strong><br>
-      <span style="color:var(--accent);">Custo total estimado: ${brl(total)}</span>
+      Filamento: <strong>${brl(filamentCost)}</strong> (${weightG}g × ${brl(filamentPriceKg/1000)}/g)<br>
+      Energia: <strong>${brl(energyCost)}</strong> (${hours.toFixed(2)}h × ${state.finance.printerPower||0}W × ${brl(state.finance.energyPrice||0)}/kWh)<br>
+      Extras: <strong>${brl(extra)}</strong><br>
+      <span style="color:var(--accent);">Total estimado: ${brl(total)}</span>
     `;
   };
 }
@@ -1347,41 +1548,41 @@ function renderAchievements() {
 async function renderAdmin() {
   if (!isAdmin) return;
 
-  // ---- Links das aulas ----
   const linksEl = $('#adminLinksContent');
   linksEl.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Carregando…</p>';
-  await fetchStudyLinks();
+  await fetchStudyMaterials();
 
   let html = '';
   state.study.weeks.forEach(w => {
     w.activities.forEach(a => {
-      const shared = studyLinks[a.id] || {};
-      const url = shared.url || a.link || '';
+      const mat = studyMaterials[a.id] || {};
+      const hasVideo = !!mat.video_url;
+      const hasPdf = !!mat.pdf_url;
+      const statusChips = [
+        hasVideo ? `<span class="tag tag--diff-facil">▶ Vídeo</span>` : '',
+        hasPdf ? `<span class="tag tag--diff-facil">📄 PDF</span>` : '',
+        (!hasVideo && !hasPdf) ? `<span class="tag tag--time" style="opacity:.5;">Sem material</span>` : '',
+      ].join('');
       html += `
         <div class="link-editor-row">
           <span class="week-tag">Sem ${w.weekNum}</span>
           <span class="act-name">${escapeHtml(a.title)}</span>
-          <input type="text" class="admin-link-input" data-act="${a.id}"
-            value="${escapeHtml(url)}" placeholder="https://youtube.com/...">
-          <button class="btn-primary btn-sm link-save-btn" data-act="${a.id}">Salvar</button>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">${statusChips}</div>
+          <button class="btn-primary btn-sm link-save-btn" data-act="${a.id}" data-title="${escapeHtml(a.title)}">Editar material</button>
         </div>`;
     });
   });
   linksEl.innerHTML = html || '<p style="color:var(--text-faint);">Nenhuma atividade encontrada.</p>';
 
   $$('.link-save-btn', linksEl).forEach(btn => {
-    btn.onclick = async () => {
+    btn.onclick = () => {
       const actId = btn.dataset.act;
-      const input = linksEl.querySelector(`.admin-link-input[data-act="${actId}"]`);
-      const url = input.value.trim();
-      btn.textContent = '…';
-      await saveStudyLink(actId, url, 'Abrir aula');
-      btn.textContent = 'Salvo ✓';
-      setTimeout(() => { btn.textContent = 'Salvar'; }, 1800);
+      const actTitle = btn.dataset.title;
+      const mat = studyMaterials[actId] || {};
+      openMaterialEditor(actId, actTitle, mat);
     };
   });
 
-  // ---- Usuários ----
   await renderUsersTable();
   if ($('#refreshUsersBtn')) $('#refreshUsersBtn').onclick = renderUsersTable;
 }
