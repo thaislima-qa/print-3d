@@ -69,7 +69,7 @@
       <button class="nav-item" data-view="finance"><span class="nav-ico">💰</span><span>Financeiro</span></button>
       <button class="nav-item" data-view="achievements"><span class="nav-ico">🏆</span><span>Conquistas</span></button>
       <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span><span>Configurações</span></button>
-      <button class="nav-item" data-view="admin" id="adminNavItem" style="display:none;"><span class="nav-ico">🛡</span><span>Administração</span><span class="admin-badge" id="adminBadge">Admin</span></button>
+      <button class="nav-item" data-view="admin" id="adminNavItem" style="display:none;"><span class="nav-ico">🛡</span><span>Painel Admin</span><span class="admin-badge" id="adminBadge">Admin</span></button>
     </nav>
 
     <div class="sidebar-footer">
@@ -325,15 +325,6 @@
           </div>
         </div>
 
-        <div class="panel">
-          <div class="panel-head">
-            <h3>Catálogo de filamentos</h3>
-            <button class="btn-ghost btn-sm" id="addFilamentBtn">+ Filamento</button>
-          </div>
-          <p class="panel-sub" style="margin-bottom:10px;">Cadastre cada rolo/tipo com seu preço real — o preço do filamento varia por marca, material e cor, então a calculadora de custo usa o filamento que você escolher em cada produto, não um valor único fixo.</p>
-          <ul class="filament-list" id="filamentList"></ul>
-        </div>
-
         <div class="panel" id="accountPanel">
           <div class="panel-head"><h3>Conta e sincronização</h3></div>
           <div class="settings-row">
@@ -382,56 +373,112 @@
       <section class="view" id="view-admin">
 
         <!-- Categorias de produtos -->
-        <div class="panel">
-          <div class="panel-head">
-            <h3>Categorias de produtos</h3>
-            <button class="btn-ghost btn-sm" id="addCategoryBtn">+ Categoria</button>
+        <div class="collapsible-panel" id="cp-categories">
+          <button class="cp-head" data-target="cp-categories">
+            <span class="cp-icon">🏷</span>
+            <span class="cp-title">Categorias de produtos</span>
+            <span class="cp-sub">Opções de categoria disponíveis no cadastro de produtos</span>
+            <span class="cp-chevron">›</span>
+          </button>
+          <div class="cp-body">
+            <div class="cp-body-inner">
+              <div class="panel-head" style="margin-bottom:10px;">
+                <p class="panel-sub">As categorias aparecem como opções no cadastro de produtos.</p>
+                <button class="btn-ghost btn-sm" id="addCategoryBtn">+ Categoria</button>
+              </div>
+              <ul class="filament-list" id="categoryList"></ul>
+            </div>
           </div>
-          <p class="panel-sub" style="margin-bottom:10px;">As categorias aparecem como opções no cadastro de produtos.</p>
-          <ul class="filament-list" id="categoryList"></ul>
         </div>
 
         <!-- Configuração de custos -->
-        <div class="panel">
-          <div class="panel-head"><h3>Configuração de custos</h3></div>
-          <p class="panel-sub" style="margin-bottom:6px;">Alimenta o cálculo automático de custo no cadastro de produtos.</p>
-          <div class="settings-row">
-            <label>Preço do filamento padrão (R$/kg)</label>
-            <input type="number" id="filamentPriceInput" step="0.01">
+        <div class="collapsible-panel" id="cp-costs">
+          <button class="cp-head" data-target="cp-costs">
+            <span class="cp-icon">🧮</span>
+            <span class="cp-title">Configuração de custos</span>
+            <span class="cp-sub">Filamento, energia e meta — alimenta o cálculo automático</span>
+            <span class="cp-chevron">›</span>
+          </button>
+          <div class="cp-body">
+            <div class="cp-body-inner">
+              <p class="panel-sub" style="margin-bottom:12px;">Alimenta o cálculo automático de custo no cadastro de produtos.</p>
+              <div class="settings-row">
+                <label>Preço do filamento padrão (R$/kg)</label>
+                <input type="number" id="filamentPriceInput" step="0.01">
+              </div>
+              <div class="settings-row">
+                <label>Preço da energia (R$/kWh)</label>
+                <input type="number" id="energyPriceInput" step="0.01">
+              </div>
+              <div class="settings-row">
+                <label>Potência média da impressora (W)</label>
+                <input type="number" id="printerPowerInput" step="1">
+              </div>
+              <div class="settings-row">
+                <label>Meta financeira (R$)</label>
+                <input type="number" id="financialGoalInput" step="1">
+              </div>
+            </div>
           </div>
-          <div class="settings-row">
-            <label>Preço da energia (R$/kWh)</label>
-            <input type="number" id="energyPriceInput" step="0.01">
-          </div>
-          <div class="settings-row">
-            <label>Potência média da impressora (W)</label>
-            <input type="number" id="printerPowerInput" step="1">
-          </div>
-          <div class="settings-row">
-            <label>Meta financeira (R$)</label>
-            <input type="number" id="financialGoalInput" step="1">
+        </div>
+
+        <!-- Catálogo de filamentos -->
+        <div class="collapsible-panel" id="cp-filaments">
+          <button class="cp-head" data-target="cp-filaments">
+            <span class="cp-icon">🧵</span>
+            <span class="cp-title">Catálogo de filamentos</span>
+            <span class="cp-sub">Cada filamento com seu preço real por kg</span>
+            <span class="cp-chevron">›</span>
+          </button>
+          <div class="cp-body">
+            <div class="cp-body-inner">
+              <div class="panel-head" style="margin-bottom:10px;">
+                <p class="panel-sub">Cadastre cada rolo com seu preço real — usado na calculadora de custo.</p>
+                <button class="btn-ghost btn-sm" id="addFilamentBtn">+ Filamento</button>
+              </div>
+              <ul class="filament-list" id="filamentList"></ul>
+            </div>
           </div>
         </div>
 
         <!-- Material de apoio das aulas -->
-        <div class="panel">
-          <div class="panel-head">
-            <h3>Material de apoio das aulas</h3>
-            <span class="panel-sub">Edite aqui — visível para todos os usuários.</span>
+        <div class="collapsible-panel" id="cp-materials">
+          <button class="cp-head" data-target="cp-materials">
+            <span class="cp-icon">📂</span>
+            <span class="cp-title">Material de apoio das aulas</span>
+            <span class="cp-sub">Vídeos e PDFs por atividade — visíveis para todos os usuários</span>
+            <span class="cp-chevron">›</span>
+          </button>
+          <div class="cp-body">
+            <div class="cp-body-inner">
+              <div id="adminLinksContent"></div>
+            </div>
           </div>
-          <div id="adminLinksContent"></div>
         </div>
 
         <!-- Usuários -->
-        <div class="panel">
-          <div class="panel-head"><h3>Usuários</h3><button class="btn-ghost btn-sm" id="refreshUsersBtn">Atualizar</button></div>
-          <div class="table-wrap">
-            <table class="data-table" id="usersTable">
-              <thead><tr><th>E-mail</th><th>Nome</th><th>Papel</th><th></th></tr></thead>
-              <tbody id="usersTableBody"></tbody>
-            </table>
+        <div class="collapsible-panel" id="cp-users">
+          <button class="cp-head" data-target="cp-users">
+            <span class="cp-icon">👥</span>
+            <span class="cp-title">Usuários</span>
+            <span class="cp-sub">Gerencie papéis e acessos</span>
+            <span class="cp-chevron">›</span>
+          </button>
+          <div class="cp-body">
+            <div class="cp-body-inner">
+              <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                <button class="btn-ghost btn-sm" id="refreshUsersBtn">Atualizar lista</button>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table" id="usersTable">
+                  <thead><tr><th>E-mail</th><th>Nome</th><th>Papel</th><th></th></tr></thead>
+                  <tbody id="usersTableBody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
+
       </section>
 
     </div>
