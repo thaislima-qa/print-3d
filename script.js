@@ -1335,6 +1335,7 @@ function openProductModal(id) {
       <button type="button" class="btn-ghost btn-sm" id="prCalcCostBtn">🧮 Calcular custo automaticamente</button>
       <p class="cost-calc-breakdown" id="prCostBreakdown"></p>
     </div>
+    <div class="field"><label>Quantidade vendida</label><input type="number" id="prSold" value="${p.sold}"></div>
     <div class="field">
       <label>Arquivo do projeto (.3mf, .stl, .f3d, .step…)</label>
       ${currentFile}
