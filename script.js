@@ -1296,10 +1296,10 @@ function openProductModal(id) {
     state.productCategories.map(c => `<option value="${escapeHtml(c.name)}" ${p.category===c.name?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
 
   openModal(isNew ? 'Novo produto' : 'Editar produto', `
-    <div class="field"><label>Nome</label><input type="text" id="prName" value="${escapeHtml(p.name)}"></div>
+    <div class="field field--required"><label>Nome <span class="required-star">*</span></label><input type="text" id="prName" value="${escapeHtml(p.name)}" placeholder="Nome do produto"></div>
     <div class="field"><label>Imagem (URL)</label><input type="text" id="prImage" value="${escapeHtml(p.image)}" placeholder="https://..."></div>
     <div class="field-row">
-      <div class="field"><label>Categoria</label><select id="prCategory">${catOptions}</select></div>
+      <div class="field field--required"><label>Categoria <span class="required-star">*</span></label><select id="prCategory">${catOptions}</select></div>
       <div class="field"><label>Status</label>
         <select id="prStatus">
           <option value="rascunho" ${p.status==='rascunho'?'selected':''}>Rascunho</option>
@@ -1309,8 +1309,10 @@ function openProductModal(id) {
       </div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Preço (R$)</label><input type="number" step="0.01" id="prPrice" value="${p.price}"></div>
-      <div class="field"><label>Custo (R$)</label><input type="number" step="0.01" id="prCost" value="${p.cost}"></div>
+      <div class="field"><label>Preço (R$) <span id="prPriceRequired" class="required-star" style="display:none;">*</span></label><input type="number" step="0.01" id="prPrice" value="${p.price || ''}"></div>
+      <div class="field"><label>Custo (R$) <span style="font-size:10px;color:var(--text-faint);">calculado</span></label>
+        <input type="number" step="0.01" id="prCost" value="${p.cost}" readonly tabindex="-1" style="background:var(--surface-3);color:var(--text-muted);cursor:not-allowed;">
+      </div>
     </div>
     <div class="field-row">
       <div class="field"><label>Peso total (g)</label><input type="number" id="prWeight" value="${p.weight}"></div>
@@ -1320,14 +1322,14 @@ function openProductModal(id) {
     <!-- Multi-filament AMS -->
     <div class="field">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <label>Filamentos (AMS)</label>
+        <label>Filamentos (AMS) <span id="prFilamentRequired" class="required-star" style="display:none;">*</span></label>
         <button type="button" class="btn-ghost btn-sm" id="prAddFilamentRow">+ Adicionar filamento</button>
       </div>
       <div id="prFilamentRows"></div>
       <div class="ams-pct-bar" id="amsPctBar">
         <div class="ams-pct-fill" id="amsPctFill"></div>
       </div>
-      <p class="ams-pct-label" id="amsPctLabel">0% utilizado — adicione filamentos até atingir 100%</p>
+      <p class="ams-pct-label" id="amsPctLabel">Adicione filamentos para distribuir o peso total</p>
     </div>
 
     <div class="field"><label>Custos extras (R$) — embalagem, mão de obra etc.</label><input type="number" step="0.01" id="prExtraCost" value="${p.extraCost || 0}"></div>
@@ -1335,7 +1337,6 @@ function openProductModal(id) {
       <button type="button" class="btn-ghost btn-sm" id="prCalcCostBtn">🧮 Calcular custo automaticamente</button>
       <p class="cost-calc-breakdown" id="prCostBreakdown"></p>
     </div>
-    <div class="field"><label>Quantidade vendida</label><input type="number" id="prSold" value="${p.sold}"></div>
     <div class="field">
       <label>Arquivo do projeto (.3mf, .stl, .f3d, .step…)</label>
       ${currentFile}
@@ -1353,22 +1354,43 @@ function openProductModal(id) {
     }}]),
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
     { label: 'Salvar', cls: 'btn-primary', onClick: async () => {
-      p.name     = $('#prName').value.trim() || 'Sem nome';
+      const name     = $('#prName').value.trim();
+      const category = $('#prCategory').value;
+      const status   = $('#prStatus').value;
+      const price    = Number($('#prPrice').value) || 0;
+      const filRows  = collectFilamentRows();
+      const filTotal = filRows.reduce((s, r) => s + r.pct, 0);
+
+      // ---- Validações ----
+      if (!name) {
+        highlight('#prName', 'Nome é obrigatório.'); return;
+      }
+      if (!category) {
+        highlight('#prCategory', 'Categoria é obrigatória.'); return;
+      }
+      if (status === 'publicado') {
+        if (!price || price <= 0) {
+          highlight('#prPrice', 'Preço é obrigatório para publicar.'); return;
+        }
+        if (!filRows.length) {
+          toast('Adicione ao menos um filamento para publicar.'); return;
+        }
+        if (filTotal !== 100) {
+          toast(`Os filamentos somam ${filTotal}% — ajuste para exatamente 100% para publicar.`); return;
+        }
+      }
+
+      p.name     = name;
       p.image    = $('#prImage').value.trim();
-      p.category = $('#prCategory').value;
-      p.status   = $('#prStatus').value;
-      p.price    = Number($('#prPrice').value) || 0;
+      p.category = category;
+      p.status   = status;
+      p.price    = price;
       p.cost     = Number($('#prCost').value) || 0;
       p.weight   = Number($('#prWeight').value) || 0;
       p.printTime= $('#prPrintTime').value.trim();
       p.extraCost= Number($('#prExtraCost').value) || 0;
       p.notes    = $('#prNotes').value.trim();
-
-      // collect multi-filament rows
-      p.filaments = collectFilamentRows();
-
-      const prevSold = p.sold || 0;
-      p.sold = Number($('#prSold').value) || 0;
+      p.filaments = filRows;
 
       // handle file remove
       const removeBtn = $('#prRemoveFile');
@@ -1393,14 +1415,6 @@ function openProductModal(id) {
         toast('Login necessário para salvar arquivos na nuvem.');
       }
 
-      // auto-log revenue on new sales
-      if (p.sold > prevSold) {
-        const diff = p.sold - prevSold;
-        state.finance.entries.push({ id: uid(), date: todayISO(), type: 'receita',
-          desc: `Venda: ${p.name} (${diff}x)`, productName: p.name,
-          productId: p.id, qty: diff, unitValue: p.price, value: diff * p.price });
-      }
-
       if (isNew) state.products.push(p);
       else { const idx = state.products.findIndex(x => x.id === p.id); if (idx >= 0) state.products[idx] = p; }
 
@@ -1412,10 +1426,11 @@ function openProductModal(id) {
 
   // ---- setup multi-filament UI after modal renders ----
   setTimeout(() => {
-    // seed rows from existing product data
-    const seedRows = p.filaments.length ? p.filaments : [{ filamentId: '', pct: 100 }];
-    seedRows.forEach(row => addFilamentRow(row.filamentId, row.pct));
-    updateAmsPctBar();
+    // seed rows from existing product data (empty by default on new products)
+    if (p.filaments && p.filaments.length) {
+      p.filaments.forEach(row => addFilamentRow(row.filamentId, row.pct));
+      updateAmsPctBar();
+    }
 
     $('#prAddFilamentRow').onclick = () => { addFilamentRow('', 0); updateAmsPctBar(); };
 
@@ -1423,6 +1438,16 @@ function openProductModal(id) {
     if (removeBtn) removeBtn.onclick = () => { removeBtn.dataset.remove='true'; removeBtn.textContent='✕ Removido'; removeBtn.disabled=true; };
 
     $('#prCalcCostBtn').onclick = () => calcProductCost();
+
+    // show/hide required markers when status changes
+    const statusSel = $('#prStatus');
+    const syncRequired = () => {
+      const isPublished = statusSel.value === 'publicado';
+      $('#prPriceRequired').style.display    = isPublished ? '' : 'none';
+      $('#prFilamentRequired').style.display = isPublished ? '' : 'none';
+    };
+    statusSel.addEventListener('change', syncRequired);
+    syncRequired(); // run once on open
   }, 50);
 }
 
@@ -2133,6 +2158,17 @@ function emptyState(icon, text) {
     <div style="font-size:32px;margin-bottom:10px;">${icon}</div>
     <p style="font-size:13.5px;">${text}</p>
   </div>`;
+}
+
+// Briefly highlights a field red and shows a toast
+function highlight(selector, message) {
+  const el = $(selector);
+  if (!el) { toast(message); return; }
+  el.style.outline = '2px solid var(--danger)';
+  el.style.outlineOffset = '2px';
+  el.focus();
+  toast(message);
+  setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2200);
 }
 
 /* ---------------------------------------------------------
