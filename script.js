@@ -730,9 +730,16 @@ function applyTheme() {
   $('#themeIcon').textContent = effective === 'dark' ? '🌙' : '☀';
   $$('.seg-btn', $('#themeSeg')).forEach(b => b.classList.toggle('is-active', b.dataset.theme === state.theme));
 }
-$('#themeToggle').onclick = () => {
-  state.theme = state.theme === 'dark' ? 'light' : (state.theme === 'light' ? 'auto' : 'dark');
-  saveState(); applyTheme();
+$('#sidebarLogoutBtn').onclick = () => {
+  if (!supabase) { toast('Você está no modo local — não há sessão para encerrar.'); return; }
+  openModal('Sair da conta?', `<p style="font-size:13.5px;color:var(--text-muted);">Seus dados ficam salvos na nuvem. Você pode entrar novamente a qualquer momento.</p>`, [
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Sair', cls: 'btn-danger', onClick: async () => {
+      await supabase.auth.signOut();
+      closeModal();
+      location.reload();
+    }}
+  ]);
 };
 
 /* ---------------------------------------------------------
