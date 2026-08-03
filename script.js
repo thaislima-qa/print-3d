@@ -599,15 +599,31 @@ $('#modalOverlay').addEventListener('click', e => { if (e.target.id === 'modalOv
    6. ACHIEVEMENTS ENGINE
 --------------------------------------------------------- */
 function parseTimeToHours(timeStr) {
-  // parses strings like "1h30", "45min", "2h", "3h20min"
   if (!timeStr) return 0;
+  // Normalize: replace comma with dot, remove spaces
+  const s = String(timeStr).trim().replace(',', '.');
+
+  // 1) Pure decimal: "2.7" / "2.7h" / "2.7hrs" / "2.7hr" / "2.7 h"
+  const decimalMatch = s.match(/^(\d+\.?\d*)\s*(?:hrs?)?$/i);
+  if (decimalMatch) return parseFloat(decimalMatch[1]);
+
+  // 2) "1h30" / "1h30min" / "1h 30"
   let h = 0, m = 0;
-  const hMatch = timeStr.match(/(\d+)\s*h/);
+  const hMatch = s.match(/(\d+)\s*h/i);
   if (hMatch) h = parseInt(hMatch[1], 10);
-  const mm = timeStr.match(/h\s*(\d+)(?!\s*h)/) || timeStr.match(/(\d+)\s*min/);
-  if (mm) m = parseInt(mm[1], 10);
+  const mMatch = s.match(/h\s*(\d+)(?!\s*h)/i) || s.match(/(\d+)\s*min/i);
+  if (mMatch) m = parseInt(mMatch[1], 10);
   return h + m / 60;
 }
+
+// Format decimal hours → "h:mm"  e.g. 2.7 → "2:42"
+function hoursToHHMM(hours) {
+  if (!hours || hours <= 0) return null;
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return `${h}:${String(m).padStart(2, '0')}`;
+}
+
 // kept for backwards-compatibility with earlier calls in this file
 const totalHoursFromActivity = parseTimeToHours;
 
@@ -1122,7 +1138,7 @@ function cardHtml(p) {
       <h5>${escapeHtml(p.title)}</h5>
       <p>${escapeHtml(p.desc || '')}</p>
       <div class="meta-row">
-        ${p.printTime ? `<span class="tag tag--time">⏱ ${escapeHtml(p.printTime)}</span>` : ''}
+        ${p.printTime ? `<span class="tag tag--time">⏱ ${hoursToHHMM(parseTimeToHours(p.printTime)) || p.printTime}</span>` : ''}
         ${p.weight ? `<span class="tag tag--time">⚖ ${escapeHtml(p.weight)}g</span>` : ''}
         ${p.version ? `<span class="tag tag--time">v${escapeHtml(p.version)}</span>` : ''}
       </div>
@@ -1322,8 +1338,15 @@ function openProductModal(id) {
       </div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Peso total (g)</label><input type="number" id="prWeight" value="${p.weight}"></div>
-      <div class="field"><label>Tempo de impressão</label><input type="text" id="prPrintTime" value="${escapeHtml(p.printTime)}" placeholder="Ex: 3h20"></div>
+      <div class="field"><label>Peso total (g) <span style="font-size:10px;color:var(--text-faint);">calculado</span></label>
+        <input type="number" id="prWeight" value="${p.weight}" readonly tabindex="-1" style="background:var(--surface-3);color:var(--text-muted);cursor:not-allowed;">
+      </div>
+      <div class="field"><label>Tempo de impressão</label>
+        <div class="printtime-input-wrap">
+          <input type="text" id="prPrintTime" value="${escapeHtml(p.printTime)}" placeholder="Ex: 2,7hrs ou 2h42">
+          <span class="printtime-tag" id="prPrintTimeTag">${p.printTime ? (hoursToHHMM(parseTimeToHours(p.printTime)) ? hoursToHHMM(parseTimeToHours(p.printTime)) + 'h' : '') : ''}</span>
+        </div>
+      </div>
     </div>
 
     <!-- Multi-filament AMS -->
@@ -1333,10 +1356,21 @@ function openProductModal(id) {
         <button type="button" class="btn-ghost btn-sm" id="prAddFilamentRow">+ Adicionar filamento</button>
       </div>
       <div id="prFilamentRows"></div>
-      <div class="ams-pct-bar" id="amsPctBar">
-        <div class="ams-pct-fill" id="amsPctFill"></div>
+      <div class="ams-total-row">
+        <span class="ams-total-label">Peso total calculado:</span>
+        <span class="ams-total-value" id="amsTotalWeight">0 g</span>
+        <button type="button" class="btn-ghost btn-sm" id="amsApplyWeight" title="Preencher campo de peso com este valor">↑ Usar como peso</button>
       </div>
-      <p class="ams-pct-label" id="amsPctLabel">Adicione filamentos para distribuir o peso total</p>
+    </div>
+
+    <!-- Desperdício de filamento -->
+    <div class="field">
+      <label>Desperdício de filamento (%)</label>
+      <div class="waste-row">
+        <input type="number" id="prWastePct" min="0" max="100" step="0.5" value="${p.wastePct || 0}" placeholder="0">
+        <span class="waste-hint" id="wasteHint">+ R$ 0,00 sobre o custo de filamento</span>
+      </div>
+      <span class="field-hint">Percentual aplicado sobre o custo total de filamentos (suporte, purga, falhas).</span>
     </div>
 
     <div class="field"><label>Custos extras (R$) — embalagem, mão de obra etc.</label><input type="number" step="0.01" id="prExtraCost" value="${p.extraCost || 0}"></div>
@@ -1366,7 +1400,6 @@ function openProductModal(id) {
       const status   = $('#prStatus').value;
       const price    = Number($('#prPrice').value) || 0;
       const filRows  = collectFilamentRows();
-      const filTotal = filRows.reduce((s, r) => s + r.pct, 0);
 
       // ---- Validações ----
       if (!name) {
@@ -1382,8 +1415,8 @@ function openProductModal(id) {
         if (!filRows.length) {
           toast('Adicione ao menos um filamento para publicar.'); return;
         }
-        if (filTotal !== 100) {
-          toast(`Os filamentos somam ${filTotal}% — ajuste para exatamente 100% para publicar.`); return;
+        if (!filRows.some(r => r.grams > 0)) {
+          toast('Informe o peso (g) de pelo menos um filamento para publicar.'); return;
         }
       }
 
@@ -1393,11 +1426,13 @@ function openProductModal(id) {
       p.status   = status;
       p.price    = price;
       p.cost     = Number($('#prCost').value) || 0;
-      p.weight   = Number($('#prWeight').value) || 0;
       p.printTime= $('#prPrintTime').value.trim();
       p.extraCost= Number($('#prExtraCost').value) || 0;
+      p.wastePct = Number($('#prWastePct').value) || 0;
       p.notes    = $('#prNotes').value.trim();
       p.filaments = filRows;
+      // weight = sum of all filament grams
+      p.weight = filRows.reduce((s, r) => s + (Number(r.grams) || 0), 0);
 
       // handle file remove
       const removeBtn = $('#prRemoveFile');
@@ -1433,20 +1468,36 @@ function openProductModal(id) {
 
   // ---- setup multi-filament UI after modal renders ----
   setTimeout(() => {
-    // seed rows from existing product data (empty by default on new products)
-    if (p.filaments && p.filaments.length) {
-      p.filaments.forEach(row => addFilamentRow(row.filamentId, row.pct));
-      updateAmsPctBar();
+    // wire printTime → live h:mm preview
+    const ptInput = $('#prPrintTime');
+    const ptTag   = $('#prPrintTimeTag');
+    if (ptInput && ptTag) {
+      const updatePtTag = () => {
+        const h = parseTimeToHours(ptInput.value);
+        const fmt = hoursToHHMM(h);
+        ptTag.textContent = fmt ? fmt + 'h' : '';
+        ptTag.style.display = fmt ? '' : 'none';
+      };
+      ptInput.addEventListener('input', updatePtTag);
+      updatePtTag();
     }
 
-    $('#prAddFilamentRow').onclick = () => { addFilamentRow('', 0); updateAmsPctBar(); };
+    if (p.filaments && p.filaments.length) {
+      p.filaments.forEach(row => addFilamentRow(row.filamentId, row.grams || 0, row.lockedPrice ?? null));
+      updateAmsTotal();
+    }
+
+    $('#prAddFilamentRow').onclick = () => { addFilamentRow('', 0); updateAmsTotal(); };
 
     const removeBtn = $('#prRemoveFile');
     if (removeBtn) removeBtn.onclick = () => { removeBtn.dataset.remove='true'; removeBtn.textContent='✕ Removido'; removeBtn.disabled=true; };
 
     $('#prCalcCostBtn').onclick = () => calcProductCost();
 
-    // show/hide required markers when status changes
+    // wire waste % input to update hint live
+    const wasteInput = $('#prWastePct');
+    if (wasteInput) wasteInput.oninput = () => updateWasteHint();
+
     const statusSel = $('#prStatus');
     const syncRequired = () => {
       const isPublished = statusSel.value === 'publicado';
@@ -1454,7 +1505,7 @@ function openProductModal(id) {
       $('#prFilamentRequired').style.display = isPublished ? '' : 'none';
     };
     statusSel.addEventListener('change', syncRequired);
-    syncRequired(); // run once on open
+    syncRequired();
   }, 50);
 }
 
@@ -1466,86 +1517,110 @@ function filamentSelectHtml(selectedId) {
   return `<option value="">Selecione…</option>${opts}`;
 }
 
-function addFilamentRow(filamentId = '', pct = 0) {
+function addFilamentRow(filamentId = '', grams = 0, lockedPrice = null) {
   const container = $('#prFilamentRows');
   if (!container) return;
   const rowId = uid();
+  const f = state.filaments.find(x => x.id === filamentId);
+  const price = lockedPrice !== null ? lockedPrice : (f ? f.pricePerKg : '');
   const row = document.createElement('div');
   row.className = 'ams-row';
   row.dataset.rowId = rowId;
+  row.dataset.lockedPrice = price;
   row.innerHTML = `
     <select class="ams-select">${filamentSelectHtml(filamentId)}</select>
     <div class="ams-pct-input-wrap">
-      <input type="number" class="ams-pct-input" min="0" max="100" step="1" value="${pct}" placeholder="0">
-      <span class="ams-pct-sign">%</span>
+      <input type="number" class="ams-grams-input" min="0" step="0.1" value="${grams > 0 ? grams : ''}" placeholder="0">
+      <span class="ams-pct-sign">g</span>
     </div>
     <button type="button" class="ams-remove" title="Remover">✕</button>`;
-  row.querySelector('.ams-remove').onclick = () => { row.remove(); updateAmsPctBar(); };
-  row.querySelector('.ams-pct-input').oninput = updateAmsPctBar;
+
+  row.querySelector('.ams-select').onchange = e => {
+    const selected = state.filaments.find(x => x.id === e.target.value);
+    row.dataset.lockedPrice = selected ? selected.pricePerKg : '';
+    updateAmsTotal();
+  };
+  row.querySelector('.ams-remove').onclick = () => { row.remove(); updateAmsTotal(); };
+  row.querySelector('.ams-grams-input').oninput = updateAmsTotal;
   container.appendChild(row);
 }
 
 function collectFilamentRows() {
   return $$('.ams-row').map(row => ({
     filamentId: row.querySelector('.ams-select').value,
-    pct: Number(row.querySelector('.ams-pct-input').value) || 0,
+    grams: Number(row.querySelector('.ams-grams-input').value) || 0,
+    lockedPrice: Number(row.dataset.lockedPrice) || null,
   })).filter(r => r.filamentId);
 }
 
-function updateAmsPctBar() {
-  const total = $$('.ams-pct-input').reduce((s, el) => s + (Number(el.value) || 0), 0);
-  const fill = $('#amsPctFill');
-  const label = $('#amsPctLabel');
-  if (!fill || !label) return;
-  const clamped = Math.min(total, 100);
-  fill.style.width = clamped + '%';
-  fill.style.background = total > 100 ? 'var(--danger)' : total === 100 ? 'var(--success)' : 'var(--accent)';
-  label.style.color = total > 100 ? 'var(--danger)' : total === 100 ? 'var(--success)' : 'var(--text-muted)';
-  label.textContent = total === 100 ? '✓ 100% — proporções corretas!'
-    : total > 100 ? `${total}% — reduza ${total - 100}% para fechar em 100%`
-    : `${total}% utilizado — faltam ${100 - total}% para fechar em 100%`;
+function updateAmsTotal() {
+  const rows = collectFilamentRows();
+  const totalG = rows.reduce((s, r) => s + r.grams, 0);
+  const totalEl = $('#amsTotalWeight');
+  if (totalEl) totalEl.textContent = totalG.toFixed(1) + ' g';
+  // also update the locked weight field
+  const wField = $('#prWeight');
+  if (wField) wField.value = totalG.toFixed(1);
+  // update waste hint live
+  updateWasteHint(rows);
+}
+
+function updateWasteHint(rows) {
+  const wastePct = Number($('#prWastePct').value) || 0;
+  const hint = $('#wasteHint');
+  if (!hint) return;
+  if (!rows) rows = collectFilamentRows();
+  // compute raw filament cost from rows
+  let rawCost = 0;
+  rows.forEach(r => {
+    const pricePerKg = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (state.filaments.find(x=>x.id===r.filamentId)?.pricePerKg || 0);
+    rawCost += r.grams * (pricePerKg / 1000);
+  });
+  const wasteCost = rawCost * (wastePct / 100);
+  hint.textContent = wastePct > 0 ? `+ ${brl(wasteCost)} sobre o custo de filamento` : '+ R$ 0,00 sobre o custo de filamento';
 }
 
 function calcProductCost() {
-  const weightG    = Number($('#prWeight').value) || 0;
   const printTimeStr = $('#prPrintTime').value.trim();
   const extra      = Number($('#prExtraCost').value) || 0;
+  const wastePct   = Number($('#prWastePct').value) || 0;
   const hours      = parseTimeToHours(printTimeStr);
   const rows       = collectFilamentRows();
+  const totalG     = rows.reduce((s, r) => s + r.grams, 0);
 
-  if (!weightG && !hours) {
-    $('#prCostBreakdown').innerHTML = '<span class="cost-calc-warn">Preencha ao menos o peso (g) ou o tempo de impressão para calcular.</span>';
+  if (!totalG && !hours) {
+    $('#prCostBreakdown').innerHTML = '<span class="cost-calc-warn">Adicione filamentos com peso ou preencha o tempo de impressão para calcular.</span>';
     return;
   }
 
-  // filament cost: proportional by %
+  // filament cost per row using locked price
   let filamentCost = 0;
   let filamentLines = '';
   if (rows.length) {
-    const totalPct = rows.reduce((s, r) => s + r.pct, 0);
     rows.forEach(r => {
       const f = state.filaments.find(x => x.id === r.filamentId);
-      if (!f) return;
-      const grams = weightG * (r.pct / 100);
-      const cost  = grams * (f.pricePerKg / 1000);
+      const pricePerKg = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (f ? f.pricePerKg : 0);
+      const cost = r.grams * (pricePerKg / 1000);
       filamentCost += cost;
-      filamentLines += `&nbsp;&nbsp;↳ ${escapeHtml(f.name)}: ${r.pct}% × ${grams.toFixed(1)}g = <strong>${brl(cost)}</strong><br>`;
+      const priceNote = (r.lockedPrice && f && r.lockedPrice !== f.pricePerKg)
+        ? ` <span style="color:var(--warn);font-size:10px;" title="Preço atual no catálogo: ${brl(f.pricePerKg)}/kg">histórico</span>`
+        : '';
+      filamentLines += `&nbsp;&nbsp;↳ ${escapeHtml(f ? f.name : r.filamentId)}: ${r.grams.toFixed(1)}g × ${brl(pricePerKg)}/kg${priceNote} = <strong>${brl(cost)}</strong><br>`;
     });
-    if (totalPct !== 100) {
-      filamentLines += `<span class="cost-calc-warn">&nbsp;&nbsp;⚠ Proporções somam ${totalPct}% — revise antes de salvar.</span><br>`;
-    }
   } else {
-    filamentLines = '<span class="cost-calc-warn">Nenhum filamento selecionado — custo de filamento = R$ 0,00.</span><br>';
+    filamentLines = '<span class="cost-calc-warn">Nenhum filamento adicionado.</span><br>';
   }
 
+  const wasteCost  = filamentCost * (wastePct / 100);
   const powerKW    = (state.finance.printerPower || 0) / 1000;
   const energyCost = hours * powerKW * (state.finance.energyPrice || 0);
-  const total      = filamentCost + energyCost + extra;
+  const total      = filamentCost + wasteCost + energyCost + extra;
 
   $('#prCost').value = total.toFixed(2);
   $('#prCostBreakdown').innerHTML = `
-    Filamento: <strong>${brl(filamentCost)}</strong><br>
+    Filamento: <strong>${brl(filamentCost)}</strong> (${totalG.toFixed(1)}g total)<br>
     ${filamentLines}
+    Desperdício (${wastePct}%): <strong>${brl(wasteCost)}</strong><br>
     Energia: <strong>${brl(energyCost)}</strong> (${hours.toFixed(2)}h × ${state.finance.printerPower||0}W × ${brl(state.finance.energyPrice||0)}/kWh)<br>
     Extras: <strong>${brl(extra)}</strong><br>
     <span style="color:var(--accent);font-weight:600;">Total estimado: ${brl(total)}</span>
@@ -1926,14 +2001,18 @@ function renderCategoryList() {
   const el = $('#categoryList');
   if (!el) return;
   if (!state.productCategories.length) { el.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Nenhuma categoria cadastrada.</p>'; return; }
-  el.innerHTML = state.productCategories.map(c => `
+  el.innerHTML = state.productCategories.map(c => {
+    const inUse = state.products.some(p => p.category === c.name);
+    return `
     <li class="filament-row" data-id="${c.id}">
       <span class="fname">${escapeHtml(c.name)}</span>
+      ${inUse ? `<span class="cat-in-use-badge" title="Em uso por produtos">em uso</span>` : ''}
       <button class="cat-edit" title="Editar">✎</button>
-      <button class="cat-del" title="Remover">✕</button>
-    </li>`).join('');
+      <button class="cat-del" title="${inUse ? 'Categoria em uso — não pode ser excluída' : 'Remover'}" ${inUse ? 'disabled' : ''}>✕</button>
+    </li>`;
+  }).join('');
   $$('.cat-edit', el).forEach(btn => btn.onclick = e => openCategoryModal(e.target.closest('.filament-row').dataset.id));
-  $$('.cat-del', el).forEach(btn => btn.onclick = e => {
+  $$('.cat-del:not([disabled])', el).forEach(btn => btn.onclick = e => {
     const id = e.target.closest('.filament-row').dataset.id;
     state.productCategories = state.productCategories.filter(x => x.id !== id);
     saveState(); renderCategoryList();
@@ -1943,16 +2022,24 @@ function renderCategoryList() {
 function openCategoryModal(id) {
   const c = id ? state.productCategories.find(x => x.id === id) : { id: uid(), name: '' };
   const isNew = !id;
+  const inUse = !isNew && state.products.some(p => p.category === c.name);
   openModal(isNew ? 'Nova categoria' : 'Editar categoria', `
     <div class="field"><label>Nome da categoria</label><input type="text" id="catName" value="${escapeHtml(c.name)}" placeholder="Ex: Organização, Decoração…"></div>
+    ${inUse ? `<p style="font-size:12px;color:var(--warn);margin-top:4px;">⚠ Esta categoria está vinculada a ${state.products.filter(p=>p.category===c.name).length} produto(s). Você pode renomear, mas não excluir.</p>` : ''}
   `, [
-    ...(isNew ? [] : [{ label: 'Excluir', cls: 'btn-danger', onClick: () => {
+    ...(!isNew && !inUse ? [{ label: 'Excluir', cls: 'btn-danger', onClick: () => {
       state.productCategories = state.productCategories.filter(x => x.id !== id);
       saveState(); closeModal(); renderCategoryList();
-    }}]),
+    }}] : []),
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
     { label: 'Salvar', cls: 'btn-primary', onClick: () => {
-      c.name = $('#catName').value.trim() || 'Sem nome';
+      const newName = $('#catName').value.trim() || 'Sem nome';
+      // if renamed, update all products that used the old name
+      if (!isNew && newName !== c.name) {
+        state.products.forEach(p => { if (p.category === c.name) p.category = newName; });
+        if (cloudMode) state.products.forEach(p => { if (p.category === newName) upsertCloudProduct(p); });
+      }
+      c.name = newName;
       if (isNew) state.productCategories.push(c);
       saveState(); closeModal(); renderCategoryList();
       toast(isNew ? 'Categoria criada.' : 'Categoria atualizada.');
@@ -2030,17 +2117,28 @@ $('#logoutBtn').onclick = () => {
 
 function renderFilamentList() {
   const el = $('#filamentList');
+  if (!el) return;
   if (!state.filaments.length) { el.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Nenhum filamento cadastrado.</p>'; return; }
-  el.innerHTML = state.filaments.map(f => `
+  el.innerHTML = state.filaments.map(f => {
+    const usedIn = state.products.filter(p =>
+      Array.isArray(p.filaments) && p.filaments.some(r => r.filamentId === f.id)
+    ).length;
+    return `
     <li class="filament-row" data-id="${f.id}">
       <span class="fname">${escapeHtml(f.name)}</span>
       <span class="fprice">${brl(f.pricePerKg)}/kg</span>
+      ${usedIn ? `<span class="cat-in-use-badge" title="${usedIn} produto(s) usam este filamento">${usedIn} produto${usedIn>1?'s':''}</span>` : ''}
       <button class="fil-edit" title="Editar">✎</button>
       <button class="fil-del" title="Remover">✕</button>
-    </li>`).join('');
+    </li>`;
+  }).join('');
   $$('.fil-edit', el).forEach(btn => btn.onclick = e => openFilamentModal(e.target.closest('.filament-row').dataset.id));
   $$('.fil-del', el).forEach(btn => btn.onclick = e => {
     const id = e.target.closest('.filament-row').dataset.id;
+    const usedIn = state.products.filter(p =>
+      Array.isArray(p.filaments) && p.filaments.some(r => r.filamentId === id)
+    ).length;
+    if (usedIn) { toast(`Não é possível remover — filamento usado em ${usedIn} produto(s).`); return; }
     state.filaments = state.filaments.filter(x => x.id !== id);
     saveState(); renderFilamentList();
   });
@@ -2049,18 +2147,34 @@ function renderFilamentList() {
 function openFilamentModal(id) {
   const f = id ? state.filaments.find(x => x.id === id) : { id: uid(), name: '', pricePerKg: state.finance.filamentPrice || 120 };
   const isNew = !id;
+  const usedIn = !isNew ? state.products.filter(p =>
+    Array.isArray(p.filaments) && p.filaments.some(r => r.filamentId === f.id)
+  ) : [];
+
+  const impactNote = usedIn.length ? `
+    <div class="filament-impact-box">
+      <strong>⚠ Preço histórico preservado</strong>
+      <p>Este filamento está em <strong>${usedIn.length} produto(s)</strong>. Atualizar o preço aqui <em>não</em> altera o custo já calculado nesses produtos — cada produto guarda o preço que estava vigente quando foi calculado. Para recalcular, abra o produto e clique em "🧮 Calcular custo automaticamente".</p>
+      <ul class="filament-impact-list">${usedIn.map(p => `<li>${escapeHtml(p.name)}</li>`).join('')}</ul>
+    </div>` : '';
+
   openModal(isNew ? 'Novo filamento' : 'Editar filamento', `
     <div class="field"><label>Nome (material, marca, cor)</label><input type="text" id="filName" value="${escapeHtml(f.name)}" placeholder="Ex: PETG Preto Voolt3D"></div>
-    <div class="field"><label>Preço por kg (R$)</label><input type="number" step="0.01" id="filPrice" value="${f.pricePerKg}"></div>
+    <div class="field"><label>Preço atual por kg (R$)</label><input type="number" step="0.01" id="filPrice" value="${f.pricePerKg}"></div>
+    ${impactNote}
   `, [
-    ...(isNew ? [] : [{ label: 'Excluir', cls: 'btn-danger', onClick: () => { state.filaments = state.filaments.filter(x=>x.id!==id); saveState(); closeModal(); renderFilamentList(); }}]),
+    ...(!isNew && !usedIn.length ? [{ label: 'Excluir', cls: 'btn-danger', onClick: () => {
+      state.filaments = state.filaments.filter(x => x.id !== id);
+      saveState(); closeModal(); renderFilamentList();
+    }}] : []),
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
     { label: 'Salvar', cls: 'btn-primary', onClick: () => {
       f.name = $('#filName').value.trim() || 'Sem nome';
       f.pricePerKg = Number($('#filPrice').value) || 0;
+      // only update the catalog — products keep their own lockedPrice
       if (isNew) state.filaments.push(f);
       saveState(); closeModal(); renderFilamentList();
-      toast(isNew ? 'Filamento adicionado.' : 'Filamento atualizado.');
+      toast(isNew ? 'Filamento adicionado.' : 'Preço atualizado no catálogo. Produtos existentes não foram alterados.');
     }}
   ]);
 }
