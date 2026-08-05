@@ -221,7 +221,7 @@ function defaultState() {
     products: [],
     finance: { entries: [], filamentPrice: 120, energyPrice: 0.95, printerPower: 120, goal: 5000 },
     filaments: [
-      { id: uid(), name: 'PLA padrão', pricePerKg: 120 },
+      { id: uid(), name: 'PLA padrão', pricePerKg: 120, priceHistory: [{ price: 120, date: todayISO(), note: 'Preço inicial' }] },
     ],
     productCategories: [
       { id: uid(), name: 'Home Office' },
@@ -229,6 +229,7 @@ function defaultState() {
       { id: uid(), name: 'Personalizado' },
       { id: uid(), name: 'Acessórios 3D' },
     ],
+    personalCreations: [],
     achievements: buildAchievementSeed(),
     quoteIndex: Math.floor(Math.random() * QUOTES.length),
   };
@@ -274,8 +275,13 @@ function mergeWithDefaults(parsed) {
     streak: { ...base.streak, ...(parsed.streak||{}) },
     study: parsed.study && parsed.study.weeks ? parsed.study : base.study,
     finance: { ...base.finance, ...(parsed.finance||{}) },
-    filaments: parsed.filaments && parsed.filaments.length ? parsed.filaments : base.filaments,
+    filaments: (parsed.filaments && parsed.filaments.length ? parsed.filaments : base.filaments).map(f => ({
+      ...f,
+      // migrate: if no priceHistory, seed it from pricePerKg
+      priceHistory: f.priceHistory || [{ price: f.pricePerKg || 0, date: todayISO(), note: 'Preço migrado' }],
+    })),
     productCategories: parsed.productCategories && parsed.productCategories.length ? parsed.productCategories : base.productCategories,
+    personalCreations: parsed.personalCreations || [],
     achievements: parsed.achievements && parsed.achievements.length ? parsed.achievements : base.achievements,
   };
 }
@@ -695,6 +701,7 @@ const VIEW_META = {
   ideas: ['Ideias', 'Seu banco de inspirações para novos produtos.'],
   products: ['Produtos', 'Catálogo do que você cria e vende.'],
   finance: ['Financeiro', 'Receitas, despesas e margem, sem letras miúdas.'],
+  personal: ['Criações Pessoais', 'Quanto você economizou imprimindo em vez de comprar.'],
   achievements: ['Conquistas', 'Cada marco do hobby ao negócio.'],
   settings: ['Configurações', 'Ajuste o app do seu jeito.'],
   admin: ['Painel Admin', 'Configurações globais e gerenciamento do sistema.'],
@@ -719,6 +726,7 @@ function renderView(view) {
   if (view === 'ideas') renderIdeas();
   if (view === 'products') renderProducts();
   if (view === 'finance') renderFinance();
+  if (view === 'personal') renderPersonal();
   if (view === 'achievements') renderAchievements();
   if (view === 'settings') renderSettings();
   if (view === 'admin') renderAdmin();
@@ -1866,6 +1874,319 @@ function openSaleModal() {
 /* ---------------------------------------------------------
    16. ACHIEVEMENTS VIEW
 --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   CRIAÇÕES PESSOAIS
+--------------------------------------------------------- */
+function renderPersonal() {
+  const items = state.personalCreations || [];
+
+  // Stats
+  let totalSaved = 0, totalSpent = 0;
+  items.forEach(item => {
+    const qty = item.qty || 1;
+    totalSpent += (item.printCost || 0) * qty;
+    totalSaved += ((item.marketPrice || 0) - (item.printCost || 0)) * qty;
+  });
+  const roi = totalSpent > 0 ? Math.round((totalSaved / totalSpent) * 100) : 0;
+
+  $('#persSaved').textContent  = brl(totalSaved);
+  $('#persSpent').textContent  = brl(totalSpent);
+  $('#persCount').textContent  = items.reduce((s, i) => s + (i.qty || 1), 0);
+  $('#persRoi').textContent    = roi + '%';
+
+  // Savings chart (horizontal bars)
+  const top = [...items]
+    .map(i => ({ name: i.name, saved: ((i.marketPrice||0) - (i.printCost||0)) * (i.qty||1), cost: (i.printCost||0) * (i.qty||1), market: (i.marketPrice||0) * (i.qty||1) }))
+    .sort((a,b) => b.saved - a.saved).slice(0, 6);
+
+  const chartEl = $('#persSavingsChart');
+  if (!top.length) {
+    chartEl.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;padding:12px 0;">Nenhum item cadastrado ainda.</p>';
+  } else {
+    const maxVal = Math.max(...top.map(r => r.market), 1);
+    chartEl.innerHTML = top.map(r => {
+      const marketPct = Math.round((r.market / maxVal) * 100);
+      const costPct   = Math.round((r.cost   / maxVal) * 100);
+      return `
+        <div class="pers-bar-row">
+          <span class="pers-bar-name">${escapeHtml(r.name)}</span>
+          <div class="pers-bar-track">
+            <div class="pers-bar pers-bar--market" style="width:${marketPct}%" title="Mercado: ${brl(r.market)}"></div>
+            <div class="pers-bar pers-bar--cost"   style="width:${costPct}%"   title="Impressão: ${brl(r.cost)}"></div>
+          </div>
+          <span class="pers-bar-saving ${r.saved >= 0 ? 'is-positive' : 'is-negative'}">${r.saved >= 0 ? '−' : '+'}${brl(Math.abs(r.saved))}</span>
+        </div>`;
+    }).join('');
+  }
+
+  // Category summary
+  const byCat = {};
+  items.forEach(i => {
+    const cat = i.category || 'Sem categoria';
+    if (!byCat[cat]) byCat[cat] = { saved: 0, count: 0 };
+    byCat[cat].saved += ((i.marketPrice||0) - (i.printCost||0)) * (i.qty||1);
+    byCat[cat].count += (i.qty||1);
+  });
+  const catEl = $('#persCategoryList');
+  const cats = Object.entries(byCat).sort((a,b) => b[1].saved - a[1].saved);
+  catEl.innerHTML = cats.length ? cats.map(([cat, v]) => `
+    <li>
+      <span>${escapeHtml(cat)} <small style="color:var(--text-faint);">(${v.count} unid.)</small></span>
+      <strong class="${v.saved >= 0 ? 'amount-pos' : 'amount-neg'}">${brl(v.saved)}</strong>
+    </li>`).join('') : '<li style="color:var(--text-faint);">—</li>';
+
+  // Table
+  const tbody = $('#personalTableBody');
+  tbody.innerHTML = items.length ? items.map(item => {
+    const qty      = item.qty || 1;
+    const unitSave = (item.marketPrice||0) - (item.printCost||0);
+    const totSave  = unitSave * qty;
+    const cls      = totSave >= 0 ? 'amount-pos' : 'amount-neg';
+    const hhmm     = item.printTime ? hoursToHHMM(parseTimeToHours(item.printTime)) : null;
+    return `
+      <tr data-id="${item.id}">
+        <td>
+          <strong>${escapeHtml(item.name)}</strong>
+          ${hhmm ? `<span class="tag tag--time" style="margin-left:6px;">⏱ ${hhmm}h</span>` : ''}
+        </td>
+        <td>${escapeHtml(item.category || '—')}</td>
+        <td style="font-family:var(--font-mono);">${qty}</td>
+        <td>${brl(item.marketPrice)}</td>
+        <td>${brl(item.printCost)}</td>
+        <td class="${cls}">${brl(unitSave)}</td>
+        <td class="${cls}"><strong>${brl(totSave)}</strong></td>
+        <td><button class="btn-ghost btn-sm pers-edit">Editar</button></td>
+      </tr>`;
+  }).join('') : `<tr><td colspan="8" style="color:var(--text-faint);">Nenhum item cadastrado ainda.</td></tr>`;
+
+  $$('.pers-edit', tbody).forEach(btn => {
+    btn.onclick = e => openPersonalModal(e.target.closest('tr').dataset.id);
+  });
+
+  if ($('#addPersonalBtn')) {
+    $('#addPersonalBtn').onclick = () => openPersonalModal(null);
+  }
+}
+
+function openPersonalModal(id) {
+  const item = id ? state.personalCreations.find(x => x.id === id) : {
+    id: uid(), name: '', category: '', qty: 1,
+    marketPrice: 0, printCost: 0, printTime: '',
+    filaments: [], wastePct: 0, notes: '',
+  };
+  const isNew = !id;
+  if (!Array.isArray(item.filaments)) item.filaments = [];
+
+  const catOptions = `<option value="">Sem categoria</option>` +
+    state.productCategories.map(c =>
+      `<option value="${escapeHtml(c.name)}" ${item.category===c.name?'selected':''}>${escapeHtml(c.name)}</option>`
+    ).join('');
+
+  openModal(isNew ? 'Novo item' : 'Editar item', `
+    <div class="field"><label>Nome do item <span class="required-star">*</span></label>
+      <input type="text" id="piName" value="${escapeHtml(item.name)}" placeholder="Ex: Suporte de headset">
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Categoria</label><select id="piCategory">${catOptions}</select></div>
+      <div class="field"><label>Quantidade impressa</label>
+        <input type="number" id="piQty" min="1" step="1" value="${item.qty || 1}">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>💰 Preço de mercado (R$) — quanto custaria comprar</label>
+      <input type="number" step="0.01" id="piMarket" value="${item.marketPrice || ''}">
+    </div>
+
+    <div class="field">
+      <label>Custo de impressão (R$) <span style="font-size:10px;color:var(--text-faint);">calculado</span></label>
+      <input type="number" step="0.01" id="piCost" value="${item.printCost || ''}" readonly tabindex="-1"
+        style="background:var(--surface-3);color:var(--text-muted);cursor:not-allowed;">
+    </div>
+
+    <div class="field">
+      <label>Tempo de impressão</label>
+      <div class="printtime-input-wrap">
+        <input type="text" id="piPrintTime" value="${escapeHtml(item.printTime)}" placeholder="Ex: 2,7hrs ou 1h30">
+        <span class="printtime-tag" id="piPrintTimeTag"></span>
+      </div>
+    </div>
+
+    <div class="field">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <label>Filamentos (AMS)</label>
+        <button type="button" class="btn-ghost btn-sm" id="piAddFilamentRow">+ Adicionar filamento</button>
+      </div>
+      <div id="piFilamentRows"></div>
+      <div class="ams-total-row">
+        <span class="ams-total-label">Peso total calculado:</span>
+        <span class="ams-total-value" id="piTotalWeight">0 g</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Desperdício de filamento (%)</label>
+      <div class="waste-row">
+        <input type="number" id="piWastePct" min="0" max="100" step="0.5" value="${item.wastePct || 0}">
+        <span class="waste-hint" id="piWasteHint">+ R$ 0,00</span>
+      </div>
+    </div>
+
+    <div class="cost-calc-box">
+      <button type="button" class="btn-ghost btn-sm" id="piCalcCostBtn">🧮 Calcular custo de impressão</button>
+      <p class="cost-calc-breakdown" id="piCostBreakdown"></p>
+    </div>
+
+    <div class="field"><label>Observações</label><textarea id="piNotes">${escapeHtml(item.notes||'')}</textarea></div>
+  `, [
+    ...(isNew ? [] : [{ label: 'Excluir', cls: 'btn-danger', onClick: () => {
+      state.personalCreations = state.personalCreations.filter(x => x.id !== id);
+      saveState(); closeModal(); renderPersonal();
+      toast('Item removido.');
+    }}]),
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Salvar', cls: 'btn-primary', onClick: () => {
+      const name = $('#piName').value.trim();
+      if (!name) { highlight('#piName', 'Nome é obrigatório.'); return; }
+
+      item.name        = name;
+      item.category    = $('#piCategory').value;
+      item.qty         = Math.max(1, Number($('#piQty').value) || 1);
+      item.marketPrice = Number($('#piMarket').value) || 0;
+      item.printCost   = Number($('#piCost').value) || 0;
+      item.printTime   = $('#piPrintTime').value.trim();
+      item.wastePct    = Number($('#piWastePct').value) || 0;
+      item.notes       = $('#piNotes').value.trim();
+      item.filaments   = piCollectFilamentRows();
+      item.weight      = item.filaments.reduce((s, r) => s + (r.grams || 0), 0);
+
+      if (isNew) state.personalCreations.push(item);
+      else { const idx = state.personalCreations.findIndex(x => x.id === id); if (idx >= 0) state.personalCreations[idx] = item; }
+
+      saveState(); closeModal(); renderPersonal();
+      toast(isNew ? 'Item criado.' : 'Item atualizado.');
+    }}
+  ]);
+
+  // Setup after modal renders
+  setTimeout(() => {
+    // printTime tag
+    const ptInput = $('#piPrintTime');
+    const ptTag   = $('#piPrintTimeTag');
+    if (ptInput && ptTag) {
+      const upd = () => { const fmt = hoursToHHMM(parseTimeToHours(ptInput.value)); ptTag.textContent = fmt ? fmt+'h' : ''; ptTag.style.display = fmt ? '' : 'none'; };
+      ptInput.addEventListener('input', upd); upd();
+    }
+
+    // filament rows (reuse catalog UI but scoped with pi- prefix)
+    if (item.filaments.length) {
+      item.filaments.forEach(r => piAddFilamentRow(r.filamentId, r.grams||0, r.lockedPrice??null));
+      piUpdateTotal();
+    }
+    $('#piAddFilamentRow').onclick = () => piAddFilamentRow('', 0);
+
+    // waste hint
+    $('#piWastePct').oninput = () => piUpdateWasteHint();
+    piUpdateWasteHint();
+
+    // calc button
+    $('#piCalcCostBtn').onclick = () => piCalcCost();
+  }, 50);
+}
+
+/* ---- personal creations filament helpers (pi- prefix to avoid collision) ---- */
+function piAddFilamentRow(filamentId = '', grams = 0, lockedPrice = null) {
+  const container = $('#piFilamentRows');
+  if (!container) return;
+  const f     = state.filaments.find(x => x.id === filamentId);
+  const price = lockedPrice !== null ? lockedPrice : (f ? f.pricePerKg : '');
+  const row   = document.createElement('div');
+  row.className = 'ams-row';
+  row.dataset.lockedPrice = price;
+  row.innerHTML = `
+    <select class="ams-select">${filamentSelectHtml(filamentId)}</select>
+    <div class="ams-pct-input-wrap">
+      <input type="number" class="ams-grams-input" min="0" step="0.1" value="${grams > 0 ? grams : ''}" placeholder="0">
+      <span class="ams-pct-sign">g</span>
+    </div>
+    <button type="button" class="ams-remove">✕</button>`;
+  row.querySelector('.ams-select').onchange = e => {
+    const sel = state.filaments.find(x => x.id === e.target.value);
+    row.dataset.lockedPrice = sel ? sel.pricePerKg : '';
+    piUpdateTotal();
+  };
+  row.querySelector('.ams-remove').onclick = () => { row.remove(); piUpdateTotal(); };
+  row.querySelector('.ams-grams-input').oninput = piUpdateTotal;
+  container.appendChild(row);
+}
+
+function piCollectFilamentRows() {
+  return $$('#piFilamentRows .ams-row').map(row => ({
+    filamentId: row.querySelector('.ams-select').value,
+    grams: Number(row.querySelector('.ams-grams-input').value) || 0,
+    lockedPrice: Number(row.dataset.lockedPrice) || null,
+  })).filter(r => r.filamentId);
+}
+
+function piUpdateTotal() {
+  const rows  = piCollectFilamentRows();
+  const total = rows.reduce((s, r) => s + r.grams, 0);
+  const el = $('#piTotalWeight');
+  if (el) el.textContent = total.toFixed(1) + ' g';
+  piUpdateWasteHint(rows);
+}
+
+function piUpdateWasteHint(rows) {
+  const wastePct = Number($('#piWastePct').value) || 0;
+  const hint = $('#piWasteHint');
+  if (!hint) return;
+  if (!rows) rows = piCollectFilamentRows();
+  let rawCost = 0;
+  rows.forEach(r => {
+    const p = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (state.filaments.find(x => x.id === r.filamentId)?.pricePerKg || 0);
+    rawCost += r.grams * (p / 1000);
+  });
+  hint.textContent = wastePct > 0 ? `+ ${brl(rawCost * wastePct / 100)} de desperdício` : '+ R$ 0,00';
+}
+
+function piCalcCost() {
+  const rows       = piCollectFilamentRows();
+  const printTimeStr = $('#piPrintTime').value.trim();
+  const wastePct   = Number($('#piWastePct').value) || 0;
+  const extra      = 0; // personal items don't have "extras" — just materials + energy
+  const hours      = parseTimeToHours(printTimeStr);
+
+  let filamentCost = 0, filLines = '';
+  rows.forEach(r => {
+    const f = state.filaments.find(x => x.id === r.filamentId);
+    const pricePerKg = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (f ? f.pricePerKg : 0);
+    const cost = r.grams * (pricePerKg / 1000);
+    filamentCost += cost;
+    filLines += `&nbsp;&nbsp;↳ ${escapeHtml(f ? f.name : '?')}: ${r.grams.toFixed(1)}g × ${brl(pricePerKg)}/kg = <strong>${brl(cost)}</strong><br>`;
+  });
+
+  const wasteCost  = filamentCost * (wastePct / 100);
+  const powerKW    = (state.finance.printerPower || 0) / 1000;
+  const energyCost = hours * powerKW * (state.finance.energyPrice || 0);
+  const total      = filamentCost + wasteCost + energyCost;
+
+  $('#piCost').value = total.toFixed(2);
+
+  const marketPrice = Number($('#piMarket').value) || 0;
+  const saving = marketPrice - total;
+
+  $('#piCostBreakdown').innerHTML = `
+    Filamento: <strong>${brl(filamentCost)}</strong><br>
+    ${filLines}
+    Desperdício (${wastePct}%): <strong>${brl(wasteCost)}</strong><br>
+    Energia: <strong>${brl(energyCost)}</strong> (${hours.toFixed(2)}h × ${state.finance.printerPower||0}W × ${brl(state.finance.energyPrice||0)}/kWh)<br>
+    Custo total: <strong>${brl(total)}</strong><br>
+    ${marketPrice > 0 ? `<span style="color:${saving>=0?'var(--success)':'var(--danger)'};font-weight:700;">
+      ${saving >= 0 ? '✓ Economia' : '⚠ Custo extra'} por unidade: ${brl(Math.abs(saving))}
+    </span>` : ''}
+  `;
+}
+
 function renderAchievements() {
   checkAchievements();
   const grid = $('#achievementsGrid');
@@ -2115,20 +2436,46 @@ $('#logoutBtn').onclick = () => {
   ]);
 };
 
+/* ---- Filament price helpers ---- */
+// Always read the most recent history entry as the current price
+function getCurrentPrice(f) {
+  if (!f) return 0;
+  if (f.priceHistory && f.priceHistory.length) {
+    return [...f.priceHistory].sort((a, b) => b.date.localeCompare(a.date))[0].price;
+  }
+  return f.pricePerKg || 0;
+}
+
+// Sync pricePerKg from history so legacy code that reads .pricePerKg still works
+function syncFilamentPrice(f) {
+  f.pricePerKg = getCurrentPrice(f);
+  return f;
+}
+
 function renderFilamentList() {
   const el = $('#filamentList');
   if (!el) return;
   if (!state.filaments.length) { el.innerHTML = '<p style="color:var(--text-faint);font-size:12.5px;">Nenhum filamento cadastrado.</p>'; return; }
   el.innerHTML = state.filaments.map(f => {
+    syncFilamentPrice(f);
     const usedIn = state.products.filter(p =>
       Array.isArray(p.filaments) && p.filaments.some(r => r.filamentId === f.id)
     ).length;
+    const hist = f.priceHistory || [];
+    const prevPrice = hist.length >= 2
+      ? [...hist].sort((a,b) => b.date.localeCompare(a.date))[1].price
+      : null;
+    const trend = prevPrice !== null
+      ? f.pricePerKg > prevPrice ? '↑' : f.pricePerKg < prevPrice ? '↓' : '='
+      : '';
+    const trendColor = trend === '↑' ? 'var(--danger)' : trend === '↓' ? 'var(--success)' : 'var(--text-faint)';
     return `
     <li class="filament-row" data-id="${f.id}">
       <span class="fname">${escapeHtml(f.name)}</span>
-      <span class="fprice">${brl(f.pricePerKg)}/kg</span>
-      ${usedIn ? `<span class="cat-in-use-badge" title="${usedIn} produto(s) usam este filamento">${usedIn} produto${usedIn>1?'s':''}</span>` : ''}
-      <button class="fil-edit" title="Editar">✎</button>
+      <span class="fprice">${brl(f.pricePerKg)}/kg ${trend ? `<span style="color:${trendColor};font-size:11px;">${trend}</span>` : ''}</span>
+      <span class="fil-hist-count" title="${hist.length} entrada(s) no histórico">📋 ${hist.length}</span>
+      ${usedIn ? `<span class="cat-in-use-badge">${usedIn} produto${usedIn>1?'s':''}</span>` : ''}
+      <button class="fil-edit" title="Editar / histórico">✎</button>
       <button class="fil-del" title="Remover">✕</button>
     </li>`;
   }).join('');
@@ -2139,44 +2486,117 @@ function renderFilamentList() {
       Array.isArray(p.filaments) && p.filaments.some(r => r.filamentId === id)
     ).length;
     if (usedIn) { toast(`Não é possível remover — filamento usado em ${usedIn} produto(s).`); return; }
-    state.filaments = state.filaments.filter(x => x.id !== id);
-    saveState(); renderFilamentList();
+    openModal('Remover filamento?', `<p style="font-size:13.5px;color:var(--text-muted);">Todo o histórico de preços será perdido. Esta ação não pode ser desfeita.</p>`, [
+      { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+      { label: 'Remover', cls: 'btn-danger', onClick: () => {
+        state.filaments = state.filaments.filter(x => x.id !== id);
+        saveState(); closeModal(); renderFilamentList();
+      }}
+    ]);
   });
 }
 
 function openFilamentModal(id) {
-  const f = id ? state.filaments.find(x => x.id === id) : { id: uid(), name: '', pricePerKg: state.finance.filamentPrice || 120 };
   const isNew = !id;
+  const f = isNew
+    ? { id: uid(), name: '', pricePerKg: state.finance.filamentPrice || 120, priceHistory: [] }
+    : state.filaments.find(x => x.id === id);
+  if (!f) return;
+  syncFilamentPrice(f);
+  if (!f.priceHistory || !f.priceHistory.length) {
+    f.priceHistory = [{ price: f.pricePerKg, date: todayISO(), note: 'Preço inicial' }];
+  }
+
   const usedIn = !isNew ? state.products.filter(p =>
     Array.isArray(p.filaments) && p.filaments.some(r => r.filamentId === f.id)
   ) : [];
 
-  const impactNote = usedIn.length ? `
-    <div class="filament-impact-box">
-      <strong>⚠ Preço histórico preservado</strong>
-      <p>Este filamento está em <strong>${usedIn.length} produto(s)</strong>. Atualizar o preço aqui <em>não</em> altera o custo já calculado nesses produtos — cada produto guarda o preço que estava vigente quando foi calculado. Para recalcular, abra o produto e clique em "🧮 Calcular custo automaticamente".</p>
-      <ul class="filament-impact-list">${usedIn.map(p => `<li>${escapeHtml(p.name)}</li>`).join('')}</ul>
+  const histSorted = [...f.priceHistory].sort((a,b) => b.date.localeCompare(a.date));
+
+  const histHtml = histSorted.length ? `
+    <div class="field">
+      <label>Histórico de preços</label>
+      <div class="price-history-list">
+        ${histSorted.map((h, i) => `
+          <div class="price-history-row ${i === 0 ? 'is-current' : ''}">
+            <span class="ph-date">${fmtDate(h.date)}</span>
+            <span class="ph-price">${brl(h.price)}/kg</span>
+            <span class="ph-note">${escapeHtml(h.note || '')}</span>
+            ${i > 0 ? `<button class="ph-del btn-ghost btn-sm" data-date="${h.date}" title="Remover entrada">✕</button>` : '<span class="ph-current-badge">atual</span>'}
+          </div>`).join('')}
+      </div>
     </div>` : '';
 
-  openModal(isNew ? 'Novo filamento' : 'Editar filamento', `
-    <div class="field"><label>Nome (material, marca, cor)</label><input type="text" id="filName" value="${escapeHtml(f.name)}" placeholder="Ex: PETG Preto Voolt3D"></div>
-    <div class="field"><label>Preço atual por kg (R$)</label><input type="number" step="0.01" id="filPrice" value="${f.pricePerKg}"></div>
-    ${impactNote}
+  openModal(isNew ? 'Novo filamento' : escapeHtml(f.name), `
+    <div class="field"><label>Nome (material, marca, cor)</label>
+      <input type="text" id="filName" value="${escapeHtml(f.name)}" placeholder="Ex: PETG Preto Voolt3D">
+    </div>
+    <div class="field">
+      <label>${isNew ? 'Preço inicial (R$/kg)' : 'Novo preço (R$/kg)'}</label>
+      <input type="number" step="0.01" id="filNewPrice" value="${f.pricePerKg}" min="0">
+    </div>
+    ${!isNew ? `
+    <div class="field">
+      <label>Data da atualização</label>
+      <input type="date" id="filPriceDate" value="${todayISO()}">
+    </div>
+    <div class="field">
+      <label>Observação (opcional)</label>
+      <input type="text" id="filPriceNote" placeholder="Ex: promoção, novo fornecedor…">
+    </div>
+    <div class="fil-price-hint" id="filPriceHint"></div>
+    ` : ''}
+    ${histHtml}
+    ${usedIn.length ? `
+    <div class="filament-impact-box">
+      <strong>ℹ Preço histórico preservado</strong>
+      <p>Salvo em <strong>${usedIn.length} produto(s)</strong>. O novo preço só afeta cálculos futuros.</p>
+      <ul class="filament-impact-list">${usedIn.map(p => `<li>${escapeHtml(p.name)}</li>`).join('')}</ul>
+    </div>` : ''}
   `, [
-    ...(!isNew && !usedIn.length ? [{ label: 'Excluir', cls: 'btn-danger', onClick: () => {
-      state.filaments = state.filaments.filter(x => x.id !== id);
-      saveState(); closeModal(); renderFilamentList();
-    }}] : []),
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
-    { label: 'Salvar', cls: 'btn-primary', onClick: () => {
-      f.name = $('#filName').value.trim() || 'Sem nome';
-      f.pricePerKg = Number($('#filPrice').value) || 0;
-      // only update the catalog — products keep their own lockedPrice
-      if (isNew) state.filaments.push(f);
+    { label: isNew ? 'Criar filamento' : 'Salvar', cls: 'btn-primary', onClick: () => {
+      const name     = $('#filName').value.trim() || 'Sem nome';
+      const newPrice = Number($('#filNewPrice').value) || 0;
+      const note     = !isNew ? ($('#filPriceNote')?.value.trim() || '') : 'Preço inicial';
+      const date     = !isNew ? ($('#filPriceDate')?.value || todayISO()) : todayISO();
+      f.name = name;
+      if (isNew) {
+        f.priceHistory = [{ price: newPrice, date, note }];
+        f.pricePerKg   = newPrice;
+        state.filaments.push(f);
+      } else if (newPrice !== f.pricePerKg) {
+        f.priceHistory.push({ price: newPrice, date, note });
+        f.pricePerKg = newPrice;
+      }
       saveState(); closeModal(); renderFilamentList();
-      toast(isNew ? 'Filamento adicionado.' : 'Preço atualizado no catálogo. Produtos existentes não foram alterados.');
+      toast(isNew ? 'Filamento criado.' : newPrice !== f.pricePerKg ? 'Preço salvo no histórico.' : 'Nome atualizado.');
     }}
   ]);
+
+  setTimeout(() => {
+    const priceInput = $('#filNewPrice');
+    const hint = $('#filPriceHint');
+    if (priceInput && hint) {
+      const updateHint = () => {
+        const newVal = Number(priceInput.value) || 0;
+        const diff   = newVal - f.pricePerKg;
+        if (Math.abs(diff) < 0.01) { hint.textContent = ''; return; }
+        const pct = f.pricePerKg > 0 ? Math.abs(Math.round((diff / f.pricePerKg) * 100)) : 0;
+        hint.innerHTML = diff > 0
+          ? `<span style="color:var(--danger);">↑ Alta de ${brl(Math.abs(diff))}/kg (${pct}%)</span>`
+          : `<span style="color:var(--success);">↓ Queda de ${brl(Math.abs(diff))}/kg (${pct}%)</span>`;
+      };
+      priceInput.addEventListener('input', updateHint);
+    }
+    $$('.ph-del').forEach(btn => btn.addEventListener('click', () => {
+      const dateToRemove = btn.dataset.date;
+      const sorted = [...f.priceHistory].sort((a,b) => b.date.localeCompare(a.date));
+      if (sorted[0].date === dateToRemove) { toast('Não é possível remover o preço atual.'); return; }
+      f.priceHistory = f.priceHistory.filter(h => h.date !== dateToRemove || h === sorted[0]);
+      saveState(); openFilamentModal(id);
+    }));
+  }, 50);
 }
 $('#addFilamentBtn').onclick = () => openFilamentModal(null);
 
