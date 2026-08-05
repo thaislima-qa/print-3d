@@ -67,6 +67,7 @@
       <button class="nav-item" data-view="ideas"><span class="nav-ico">💡</span><span>Ideias</span></button>
       <button class="nav-item" data-view="products"><span class="nav-ico">📦</span><span>Produtos</span></button>
       <button class="nav-item" data-view="finance"><span class="nav-ico">💰</span><span>Financeiro</span></button>
+      <button class="nav-item" data-view="personal"><span class="nav-ico">🏠</span><span>Criações Pessoais</span></button>
       <button class="nav-item" data-view="achievements"><span class="nav-ico">🏆</span><span>Conquistas</span></button>
       <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span><span>Configurações</span></button>
       <button class="nav-item" data-view="admin" id="adminNavItem" style="display:none;"><span class="nav-ico">🛡</span><span>Painel Admin</span><span class="admin-badge" id="adminBadge">Admin</span></button>
@@ -301,6 +302,74 @@
             </table>
           </div>
         </div>
+      </section>
+
+      <!-- ============ CRIAÇÕES PESSOAIS ============ -->
+      <section class="view" id="view-personal">
+
+        <!-- Stats row -->
+        <div class="stat-grid">
+          <div class="stat-card stat-card--accent">
+            <div class="stat-icon">💚</div>
+            <div class="stat-value" id="persSaved">R$ 0</div>
+            <div class="stat-label">Total economizado</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🧵</div>
+            <div class="stat-value" id="persSpent">R$ 0</div>
+            <div class="stat-label">Total gasto imprimindo</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📦</div>
+            <div class="stat-value" id="persCount">0</div>
+            <div class="stat-label">Itens criados</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📈</div>
+            <div class="stat-value" id="persRoi">0%</div>
+            <div class="stat-label">ROI médio</div>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="panel panel--chart">
+            <div class="panel-head">
+              <h3>Maiores economias</h3>
+              <span class="panel-sub">Custo de impressão vs. preço de mercado</span>
+            </div>
+            <div id="persSavingsChart"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Resumo por categoria</h3></div>
+            <ul class="rank-list" id="persCategoryList"></ul>
+          </div>
+        </div>
+
+        <!-- Items list -->
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Itens</h3>
+            <button class="btn-primary" id="addPersonalBtn">+ Novo item</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="personalTable">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Categoria</th>
+                  <th>Qtd</th>
+                  <th>Preço mercado</th>
+                  <th>Custo impressão</th>
+                  <th>Economia unitária</th>
+                  <th>Economia total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="personalTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
       </section>
 
       <!-- ============ CONQUISTAS ============ -->
