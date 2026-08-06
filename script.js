@@ -906,15 +906,33 @@ function renderStudy() {
   $('#studyOverallBar').style.width = overall + '%';
   $('#studyOverallPct').textContent = overall + '%';
 
+  // Build month tabs from actual data (supports custom months beyond 3)
+  const allMonths = [...new Set(state.study.weeks.map(w => w.month))].sort((a,b) => a-b);
   const tabs = $('#monthTabs');
-  tabs.innerHTML = [1,2,3].map(m => `<button class="month-tab ${m===activeMonth?'is-active':''}" data-month="${m}">Mês ${m}</button>`).join('');
-  $$('.month-tab', tabs).forEach(btn => btn.onclick = () => { activeMonth = Number(btn.dataset.month); renderStudy(); });
+  tabs.innerHTML = allMonths.map(m =>
+    `<button class="month-tab ${m===activeMonth?'is-active':''}" data-month="${m}">Mês ${m}</button>`
+  ).join('') +
+  `<button class="month-tab month-tab--add" id="addMonthBtn" title="Adicionar novo mês">+ Mês</button>`;
+  $$('.month-tab[data-month]', tabs).forEach(btn => {
+    btn.onclick = () => { activeMonth = Number(btn.dataset.month); renderStudy(); };
+  });
+  $('#addMonthBtn').onclick = () => {
+    const nextMonth = Math.max(...allMonths) + 1;
+    addNewWeek(nextMonth, true);
+  };
 
   const weeks = state.study.weeks.filter(w => w.month === activeMonth);
   const content = $('#studyContent');
-  content.innerHTML = weeks.map(weekHtml).join('');
 
+  // Add week button for this month
+  const addWeekBtnHtml = `
+    <button class="btn-ghost add-week-btn" id="addWeekBtn">+ Nova semana neste mês</button>`;
+
+  content.innerHTML = weeks.map(weekHtml).join('') + addWeekBtnHtml;
   weeks.forEach(w => bindWeekEvents(w));
+
+  // bind new-week button
+  $('#addWeekBtn').onclick = () => addNewWeek(activeMonth, false);
 }
 
 function weekProgress(week) {
@@ -925,11 +943,14 @@ function weekProgress(week) {
 
 function weekHtml(week) {
   const pct = weekProgress(week);
-  const topicsChips = week.topics.map(t => `<span class="tag tag--time">${escapeHtml(t)}</span>`).join('');
-  const grouped = { topico: [], exercicio: [], projeto: [] };
-  week.activities.forEach(a => grouped[a.type]?.push(a));
+  const topicsChips = (week.topics || []).map(t => `<span class="tag tag--time">${escapeHtml(t)}</span>`).join('');
+  const grouped = { topico: [], exercicio: [], projeto: [], custom: [] };
+  week.activities.forEach(a => {
+    const bucket = a.custom ? 'custom' : (grouped[a.type] !== undefined ? a.type : 'custom');
+    grouped[bucket].push(a);
+  });
 
-  const groupLabel = { topico: 'Tópicos de estudo', exercicio: 'Exercícios', projeto: 'Projetos' };
+  const groupLabel = { topico: 'Tópicos de estudo', exercicio: 'Exercícios', projeto: 'Projetos', custom: 'Adicionadas por mim' };
   let body = '';
   Object.entries(grouped).forEach(([key, acts]) => {
     if (!acts.length) return;
@@ -937,15 +958,22 @@ function weekHtml(week) {
     body += acts.map(a => activityHtml(week.id, a)).join('');
   });
 
+  const isCustomWeek = !!week.custom;
+
   return `
     <div class="week-block" data-week="${week.id}">
       <div class="week-head">
-        <h4>Semana ${week.weekNum} · ${escapeHtml(week.title)}</h4>
+        <h4>${isCustomWeek ? '✏ ' : ''}Semana ${week.weekNum} · ${escapeHtml(week.title)}</h4>
         <div class="printbar"><div class="printbar-fill" style="width:${pct}%"></div></div>
         <span class="pct">${pct}%</span>
+        <div class="week-actions">
+          <button class="btn-ghost btn-sm week-edit-btn" data-week="${week.id}" title="Editar semana">✎</button>
+          ${isCustomWeek ? `<button class="btn-ghost btn-sm week-del-btn" data-week="${week.id}" title="Remover semana">✕</button>` : ''}
+          <button class="btn-ghost btn-sm week-add-act-btn" data-week="${week.id}" title="Adicionar atividade">+ Atividade</button>
+        </div>
       </div>
-      <div class="meta-row" style="margin-bottom:10px;">${topicsChips}</div>
-      ${body}
+      ${topicsChips ? `<div class="meta-row" style="margin-bottom:10px;">${topicsChips}</div>` : ''}
+      ${body || '<p style="color:var(--text-faint);font-size:12.5px;padding:8px 0;">Nenhuma atividade nesta semana ainda.</p>'}
     </div>`;
 }
 
@@ -969,13 +997,15 @@ function activityHtml(weekId, a) {
           <div class="activity-desc">${escapeHtml(a.desc)}</div>
           <div class="activity-meta">
             <span class="tag tag--time">⏱ ${escapeHtml(a.time || '—')}</span>
-            <span class="tag tag--diff-${a.difficulty}">${DIFF_LABEL[a.difficulty]}</span>
-            <span class="tag tag--prio-${a.priority}">${PRIO_LABEL[a.priority]}</span>
+            <span class="tag tag--diff-${a.difficulty}">${DIFF_LABEL[a.difficulty] || ''}</span>
+            <span class="tag tag--prio-${a.priority}">${PRIO_LABEL[a.priority] || ''}</span>
+            ${a.custom ? '<span class="tag tag--custom">minha</span>' : ''}
           </div>
           <div class="activity-actions">
             ${materialBtn}
             <button class="btn-ghost btn-sm act-note-toggle">Observações</button>
             <button class="btn-primary btn-sm act-done">${a.done ? 'Concluído ✓' : 'Marcar concluído'}</button>
+            ${a.custom ? `<button class="btn-ghost btn-sm act-edit-btn" title="Editar">✎</button><button class="btn-ghost btn-sm act-del-btn" style="color:var(--danger);" title="Remover">✕</button>` : ''}
           </div>
           <textarea class="note-input act-note" placeholder="Suas observações..." style="display:none;">${escapeHtml(a.notes)}</textarea>
         </div>
@@ -983,9 +1013,138 @@ function activityHtml(weekId, a) {
     </div>`;
 }
 
+/* ---- Study plan: add / edit weeks and activities ---- */
+
+function addNewWeek(month, switchToMonth = false) {
+  const weeksInMonth = state.study.weeks.filter(w => w.month === month);
+  const maxWeekNum   = state.study.weeks.reduce((mx, w) => Math.max(mx, w.weekNum), 0);
+  const newWeek = {
+    id: uid(), month, weekNum: maxWeekNum + 1,
+    title: 'Nova semana', topics: [], activities: [], custom: true,
+  };
+  openModal('Nova semana', `
+    <div class="field"><label>Título da semana</label>
+      <input type="text" id="wkTitle" placeholder="Ex: Técnicas avançadas de modelagem">
+    </div>
+    <div class="field"><label>Tópicos (separados por vírgula)</label>
+      <input type="text" id="wkTopics" placeholder="Ex: Fusion 360, Fillet, Tolerâncias">
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Criar semana', cls: 'btn-primary', onClick: () => {
+      const title = $('#wkTitle').value.trim() || 'Nova semana';
+      const topics = $('#wkTopics').value.split(',').map(t => t.trim()).filter(Boolean);
+      newWeek.title = title;
+      newWeek.topics = topics;
+      state.study.weeks.push(newWeek);
+      if (switchToMonth) activeMonth = month;
+      saveState(); closeModal(); renderStudy();
+      toast(`Semana ${newWeek.weekNum} criada no Mês ${month}.`);
+    }}
+  ]);
+}
+
+function openWeekModal(week) {
+  openModal('Editar semana', `
+    <div class="field"><label>Título</label>
+      <input type="text" id="wkEditTitle" value="${escapeHtml(week.title)}">
+    </div>
+    <div class="field"><label>Tópicos (separados por vírgula)</label>
+      <input type="text" id="wkEditTopics" value="${(week.topics||[]).join(', ')}">
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: 'Salvar', cls: 'btn-primary', onClick: () => {
+      week.title  = $('#wkEditTitle').value.trim() || week.title;
+      week.topics = $('#wkEditTopics').value.split(',').map(t => t.trim()).filter(Boolean);
+      saveState(); closeModal(); renderStudy();
+      toast('Semana atualizada.');
+    }}
+  ]);
+}
+
+function openActivityModal(week, existing) {
+  const isNew = !existing;
+  const act = existing || {
+    id: uid(), title: '', desc: '', time: '', difficulty: 'medio',
+    priority: 'media', type: 'topico', notes: '', done: false, link: '', custom: true,
+  };
+  openModal(isNew ? 'Nova atividade' : 'Editar atividade', `
+    <div class="field"><label>Título <span class="required-star">*</span></label>
+      <input type="text" id="actTitle" value="${escapeHtml(act.title)}" placeholder="Ex: Praticar snap-fit">
+    </div>
+    <div class="field"><label>Descrição</label>
+      <textarea id="actDesc" rows="2" placeholder="Descreva o objetivo desta atividade…">${escapeHtml(act.desc)}</textarea>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Tempo estimado</label>
+        <input type="text" id="actTime" value="${escapeHtml(act.time)}" placeholder="Ex: 1h30 ou 1,5hrs">
+      </div>
+      <div class="field"><label>Tipo</label>
+        <select id="actType">
+          <option value="topico"   ${act.type==='topico'   ?'selected':''}>Tópico</option>
+          <option value="exercicio"${act.type==='exercicio'?'selected':''}>Exercício</option>
+          <option value="projeto"  ${act.type==='projeto'  ?'selected':''}>Projeto</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Dificuldade</label>
+        <select id="actDiff">
+          <option value="facil"  ${act.difficulty==='facil'  ?'selected':''}>Fácil</option>
+          <option value="medio"  ${act.difficulty==='medio'  ?'selected':''}>Médio</option>
+          <option value="dificil"${act.difficulty==='dificil'?'selected':''}>Difícil</option>
+        </select>
+      </div>
+      <div class="field"><label>Prioridade</label>
+        <select id="actPrio">
+          <option value="alta" ${act.priority==='alta' ?'selected':''}>Alta</option>
+          <option value="media"${act.priority==='media'?'selected':''}>Média</option>
+          <option value="baixa"${act.priority==='baixa'?'selected':''}>Baixa</option>
+        </select>
+      </div>
+    </div>
+  `, [
+    { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+    { label: isNew ? 'Adicionar' : 'Salvar', cls: 'btn-primary', onClick: () => {
+      const title = $('#actTitle').value.trim();
+      if (!title) { highlight('#actTitle', 'Título é obrigatório.'); return; }
+      act.title      = title;
+      act.desc       = $('#actDesc').value.trim();
+      act.time       = $('#actTime').value.trim();
+      act.type       = $('#actType').value;
+      act.difficulty = $('#actDiff').value;
+      act.priority   = $('#actPrio').value;
+      act.custom     = true;
+      if (isNew) week.activities.push(act);
+      saveState(); closeModal(); renderStudy();
+      toast(isNew ? 'Atividade adicionada.' : 'Atividade atualizada.');
+    }}
+  ]);
+}
+
 function bindWeekEvents(week) {
   const block = document.querySelector(`.week-block[data-week="${week.id}"]`);
   if (!block) return;
+
+  // Week-level actions
+  const editBtn = $('.week-edit-btn', block);
+  if (editBtn) editBtn.onclick = () => openWeekModal(week);
+
+  const delBtn = $('.week-del-btn', block);
+  if (delBtn) delBtn.onclick = () => {
+    openModal('Remover semana?', `<p style="font-size:13.5px;color:var(--text-muted);">A semana "${escapeHtml(week.title)}" e todas as suas atividades serão removidas.</p>`, [
+      { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
+      { label: 'Remover', cls: 'btn-danger', onClick: () => {
+        state.study.weeks = state.study.weeks.filter(w => w.id !== week.id);
+        saveState(); closeModal(); renderStudy();
+        toast('Semana removida.');
+      }}
+    ]);
+  };
+
+  const addActBtn = $('.week-add-act-btn', block);
+  if (addActBtn) addActBtn.onclick = () => openActivityModal(week, null);
 
   $$('.activity', block).forEach(actEl => {
     const actId = actEl.dataset.act;
@@ -1017,6 +1176,17 @@ function bindWeekEvents(week) {
       noteBox.style.display = noteBox.style.display === 'none' ? 'block' : 'none';
     };
     noteBox.onblur = () => { activity.notes = noteBox.value; saveState(); };
+
+    // Edit / delete buttons (only on custom activities)
+    const editActBtn = $('.act-edit-btn', actEl);
+    if (editActBtn) editActBtn.onclick = () => openActivityModal(week, activity);
+
+    const delActBtn = $('.act-del-btn', actEl);
+    if (delActBtn) delActBtn.onclick = () => {
+      week.activities = week.activities.filter(a => a.id !== activity.id);
+      saveState(); renderStudy();
+      toast('Atividade removida.');
+    };
   });
 }
 
