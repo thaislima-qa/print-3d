@@ -2000,16 +2000,11 @@ function openQuickCalc() {
       const pricePerKg = Number($('#qcPrice').value) || 0;
       const wastePct   = Number($('#qcWaste').value) || 0;
 
-      // validate all required
-      const missing = [];
-      if (!weightG)   missing.push('Peso');
-      if (!timeStr)   missing.push('Tempo');
-      if (!filId)     missing.push('Filamento');
-      if (!pricePerKg) missing.push('Preço do filamento');
-      if (missing.length) {
-        toast(`Preencha: ${missing.join(', ')}.`);
-        return;
-      }
+      // validate all required — each field gets its own clear message
+      if (!weightG)    { toast('Informe o peso do filamento (g).'); return; }
+      if (!timeStr)    { toast('Informe o tempo de impressão.'); return; }
+      if (!filId)      { toast('Selecione um filamento.'); return; }
+      if (!pricePerKg) { toast('Informe o preço do filamento (R$/kg).'); return; }
 
       const hours       = parseTimeToHours(timeStr);
       const filCost     = weightG * (pricePerKg / 1000);
@@ -2557,6 +2552,16 @@ function piCalcCost() {
   const extra      = 0; // personal items don't have "extras" — just materials + energy
   const hours      = parseTimeToHours(printTimeStr);
 
+  if (!rows.length) {
+    $('#piCostBreakdown').innerHTML = '<span class="cost-calc-warn">Adicione ao menos um filamento com peso (g) para calcular.</span>';
+    return;
+  }
+  if (!hours) {
+    $('#piCostBreakdown').innerHTML = '<span class="cost-calc-warn">Preencha o tempo de impressão para calcular.</span>';
+    highlight('#piPrintTime', 'Tempo de impressão é obrigatório para o cálculo.');
+    return;
+  }
+
   let filamentCost = 0, filLines = '';
   rows.forEach(r => {
     const f = state.filaments.find(x => x.id === r.filamentId);
@@ -2565,8 +2570,6 @@ function piCalcCost() {
     filamentCost += cost;
     filLines += `&nbsp;&nbsp;↳ ${escapeHtml(f ? f.name : '?')}: ${r.grams.toFixed(1)}g × ${brl(pricePerKg)}/kg = <strong>${brl(cost)}</strong><br>`;
   });
-
-  const wasteCost  = filamentCost * (wastePct / 100);
   const powerKW    = (state.finance.printerPower || 0) / 1000;
   const energyCost = hours * powerKW * (state.finance.energyPrice || 0);
   const total      = filamentCost + wasteCost + energyCost;
