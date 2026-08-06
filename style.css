@@ -546,6 +546,42 @@ body::before{
 .mat-viewer-label{ font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text-muted); }
 .mat-pdf-btn{ display:inline-flex; align-items:center; gap:8px; width:100%; }
 
+/* Quick cost calculator button */
+.calc-quick-btn{
+  display:flex; align-items:center; gap:7px;
+  background: var(--surface); border:1px solid var(--border);
+  border-radius:999px; padding:7px 14px;
+  font-size:13px; font-weight:600; color:var(--text);
+  cursor:pointer; white-space:nowrap;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.calc-quick-btn:hover{ background:var(--accent-soft); border-color:rgba(255,107,53,.35); color:var(--accent); transform:translateY(-1px); }
+@media(max-width:900px){ .calc-quick-btn span{ display:none; } }
+
+/* Quick calc result */
+.qc-result{
+  margin-top:16px; border:1px solid var(--border); border-radius:var(--radius-md);
+  overflow:hidden; animation: fadeUp .25s ease;
+}
+.qc-result-grid{ display:flex; flex-direction:column; }
+.qc-result-row{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:9px 14px; font-size:13px; border-bottom:1px solid var(--border);
+}
+.qc-result-row:last-child{ border-bottom:none; }
+.qc-result-row span:first-child{ color:var(--text-muted); }
+.qc-result-row span:last-child{ font-family:var(--font-mono); font-weight:600; }
+.qc-result-total{
+  background:var(--accent-soft);
+}
+.qc-result-total span:first-child{ color:var(--accent); font-weight:700; }
+.qc-result-total span:last-child{ font-size:16px; color:var(--accent); }
+.qc-result-tags{
+  display:flex; flex-wrap:wrap; gap:5px;
+  padding:10px 14px; background:var(--surface-2);
+  border-top:1px solid var(--border);
+}
+
 /* AMS multi-filament */
 .ams-row{
   display:grid;
