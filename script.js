@@ -346,25 +346,51 @@ async function ensureProfile(user) {
 }
 
 // Shared study links cache — loaded once per session from Supabase
-// Study materials cache { [activityId]: { video_url, pdf_url, pdf_name } }
+// studyMaterials cache: { [activityId]: [ { id, type:'video'|'pdf', title, url, pdfName } ] }
 let studyMaterials = {};
 
+function parseMaterialRow(r) {
+  // Try to parse items array from video_url column (new format)
+  try {
+    const parsed = JSON.parse(r.video_url || '[]');
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  // Backward-compat: old single video + pdf format
+  const items = [];
+  if (r.video_url && !r.video_url.startsWith('[')) items.push({ id: uid(), type: 'video', title: 'Aula', url: r.video_url });
+  if (r.pdf_url) items.push({ id: uid(), type: 'pdf', title: r.pdf_name || 'Material PDF', url: r.pdf_url, pdfName: r.pdf_name });
+  return items;
+}
+
 async function fetchStudyMaterials() {
-  if (!supabase) return;
+  if (!supabase) {
+    // guest mode: load from state
+    studyMaterials = state.studyMaterials || {};
+    return;
+  }
   const { data } = await supabase.from('study_materials').select('activity_id, video_url, pdf_url, pdf_name');
   if (data) {
     studyMaterials = {};
-    data.forEach(r => { studyMaterials[r.activity_id] = { video_url: r.video_url, pdf_url: r.pdf_url, pdf_name: r.pdf_name }; });
+    data.forEach(r => { studyMaterials[r.activity_id] = parseMaterialRow(r); });
   }
 }
 
-async function saveStudyMaterial(activityId, { video_url = '', pdf_url = '', pdf_name = '' }) {
-  if (!supabase || !currentUser) return;
-  await supabase.from('study_materials').upsert({
-    activity_id: activityId, video_url, pdf_url, pdf_name,
-    updated_by: currentUser.id,
-  }, { onConflict: 'activity_id' });
-  studyMaterials[activityId] = { video_url, pdf_url, pdf_name };
+async function saveStudyMaterials(activityId, items) {
+  // items: [ { id, type, title, url, pdfName? } ]
+  studyMaterials[activityId] = items;
+  if (supabase && currentUser) {
+    await supabase.from('study_materials').upsert({
+      activity_id: activityId,
+      video_url: JSON.stringify(items),  // store array as JSON
+      pdf_url: '', pdf_name: '',
+      updated_by: currentUser.id,
+    }, { onConflict: 'activity_id' });
+  } else {
+    // guest: persist to state
+    if (!state.studyMaterials) state.studyMaterials = {};
+    state.studyMaterials[activityId] = items;
+    saveState();
+  }
 }
 
 async function uploadToStorage(bucket, path, file) {
@@ -981,11 +1007,11 @@ const DIFF_LABEL = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil' };
 const PRIO_LABEL = { alta: 'Prioridade alta', media: 'Prioridade média', baixa: 'Prioridade baixa' };
 
 function activityHtml(weekId, a) {
-  const mat = studyMaterials[a.id] || {};
-  const hasMaterial = !!(mat.video_url || mat.pdf_url);
+  const matItems = studyMaterials[a.id] || [];
+  const hasMaterial = matItems.length > 0;
   const materialBtn = (hasMaterial || isAdmin)
     ? `<button class="link-btn act-material ${hasMaterial ? '' : 'act-material--empty'}" style="${hasMaterial ? '' : 'opacity:.45;'}">
-        ${hasMaterial ? '📂 Material de apoio' : (isAdmin ? '📂 Adicionar material' : '')}
+        ${hasMaterial ? `📂 Material de apoio${matItems.length > 1 ? ` <span class="mat-count">${matItems.length}</span>` : ''}` : (isAdmin ? '📂 Adicionar material' : '')}
        </button>`
     : '';
   return `
@@ -1165,9 +1191,9 @@ function bindWeekEvents(week) {
     const matBtn = $('.act-material', actEl);
     if (matBtn) {
       matBtn.onclick = () => {
-        const mat = studyMaterials[actId] || {};
-        if (isAdmin) openMaterialEditor(actId, activity.title, mat);
-        else openMaterialViewer(activity.title, mat);
+        const items = studyMaterials[actId] || [];
+        if (isAdmin) openMaterialEditor(actId, activity.title, items);
+        else openMaterialViewer(activity.title, items);
       };
     }
 
@@ -1190,81 +1216,112 @@ function bindWeekEvents(week) {
   });
 }
 
-// Admin: edita vídeo + faz upload de PDF
-function openMaterialEditor(actId, actTitle, mat) {
-  openModal(`Material — ${escapeHtml(actTitle)}`, `
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:2px;">Visível para todos os usuários.</p>
-    <div class="field">
-      <label>URL do vídeo (YouTube, Vimeo, Drive…)</label>
-      <input type="text" id="matVideo" value="${escapeHtml(mat.video_url || '')}" placeholder="https://youtube.com/watch?v=...">
-    </div>
-    <div class="field">
-      <label>PDF de apoio</label>
-      ${mat.pdf_url ? `<div class="mat-current-file">📄 <a href="${escapeHtml(mat.pdf_url)}" target="_blank">${escapeHtml(mat.pdf_name || 'Arquivo atual')}</a> <button class="btn-ghost btn-sm" id="matRemovePdf">Remover</button></div>` : ''}
-      <input type="file" id="matPdfFile" accept="application/pdf" style="margin-top:6px;">
-      <span class="field-hint">Máx. 20 MB. Deixe vazio para manter o arquivo atual.</span>
-    </div>
-  `, [
+// Admin: gerencia lista de materiais por atividade
+function openMaterialEditor(actId, actTitle, items) {
+  // work on a deep copy so cancel truly discards changes
+  let draft = items.map(i => ({ ...i }));
+
+  function renderEditorBody() {
+    const listHtml = draft.length ? draft.map((item, idx) => `
+      <div class="mat-editor-row" data-idx="${idx}">
+        <div class="mat-editor-row-head">
+          <span class="mat-type-badge mat-type-${item.type}">${item.type === 'video' ? '▶ Vídeo' : '📄 PDF'}</span>
+          <input type="text" class="mat-title-input" value="${escapeHtml(item.title || '')}" placeholder="Título do material" data-idx="${idx}">
+          <button class="ams-remove mat-del-btn" data-idx="${idx}" title="Remover">✕</button>
+        </div>
+        ${item.type === 'video' ? `
+          <input type="text" class="mat-url-input" value="${escapeHtml(item.url || '')}" placeholder="https://youtube.com/watch?v=..." data-idx="${idx}">
+        ` : `
+          ${item.url ? `<div class="mat-current-file">📄 <a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.pdfName || 'Arquivo atual')}</a> <button class="btn-ghost btn-sm mat-pdf-remove" data-idx="${idx}">Remover</button></div>` : ''}
+          <input type="file" class="mat-pdf-input" accept="application/pdf" data-idx="${idx}">
+          <span class="field-hint">Máx. 20 MB</span>
+        `}
+      </div>`).join('<hr style="border:none;border-top:1px solid var(--border);margin:10px 0;">') :
+      '<p style="color:var(--text-faint);font-size:12.5px;">Nenhum material ainda. Adicione abaixo.</p>';
+
+    return `
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Materiais visíveis para todos os usuários.</p>
+      <div id="matEditorList">${listHtml}</div>
+      <div class="mat-add-row">
+        <button class="btn-ghost btn-sm" id="matAddVideo">+ Vídeo</button>
+        <button class="btn-ghost btn-sm" id="matAddPdf">+ PDF</button>
+      </div>`;
+  }
+
+  function reopen() { closeModal(); setTimeout(() => openMaterialEditor(actId, actTitle, draft), 80); }
+
+  openModal(`📂 ${escapeHtml(actTitle)}`, renderEditorBody(), [
     { label: 'Cancelar', cls: 'btn-ghost', onClick: closeModal },
-    { label: 'Salvar', cls: 'btn-primary', onClick: async () => {
-      const videoUrl = $('#matVideo').value.trim();
-      let pdfUrl = mat.pdf_url || '';
-      let pdfName = mat.pdf_name || '';
-      const fileInput = $('#matPdfFile');
+    { label: 'Salvar tudo', cls: 'btn-primary', onClick: async () => {
+      // collect text fields back into draft
+      $$('.mat-title-input').forEach(el => { draft[+el.dataset.idx].title = el.value.trim(); });
+      $$('.mat-url-input').forEach(el => { draft[+el.dataset.idx].url = el.value.trim(); });
 
-      // handle remove
-      const removeBtn = $('#matRemovePdf');
-      if (removeBtn && removeBtn.dataset.remove === 'true') {
-        await deleteFromStorage('materials', mat.pdf_path || '');
-        pdfUrl = ''; pdfName = '';
-      }
-
-      // handle new upload
-      if (fileInput && fileInput.files.length > 0) {
-        const file = fileInput.files[0];
-        if (file.size > 20 * 1024 * 1024) { toast('PDF muito grande — máx. 20 MB.'); return; }
-        toast('Enviando PDF...');
-        const path = `${actId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      // handle PDF uploads
+      const uploadPromises = $$('.mat-pdf-input').map(async el => {
+        const idx = +el.dataset.idx;
+        if (!el.files.length) return;
+        const file = el.files[0];
+        if (file.size > 20 * 1024 * 1024) { toast(`PDF "${file.name}" muito grande — máx. 20 MB.`); return; }
+        toast(`Enviando "${file.name}"…`);
+        const path = `${actId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
         const result = await uploadToStorage('materials', path, file);
-        if (!result) { toast('Erro no upload. Tente novamente.'); return; }
-        pdfUrl = result.publicUrl;
-        pdfName = file.name;
-      }
+        if (result) { draft[idx].url = result.publicUrl; draft[idx].pdfName = file.name; }
+      });
+      await Promise.all(uploadPromises);
 
-      await saveStudyMaterial(actId, { video_url: videoUrl, pdf_url: pdfUrl, pdf_name: pdfName });
+      // filter out items with no url
+      draft = draft.filter(i => i.url);
+
+      await saveStudyMaterials(actId, draft);
       closeModal();
       renderStudy();
-      toast('Material salvo para todos os usuários.');
+      toast(`${draft.length} material(is) salvo(s).`);
     }}
   ]);
 
-  // wire up remove button after modal renders
   setTimeout(() => {
-    const btn = $('#matRemovePdf');
-    if (btn) btn.onclick = () => { btn.dataset.remove = 'true'; btn.textContent = '✕ Removido'; btn.disabled = true; };
+    $('#matAddVideo').onclick = () => { draft.push({ id: uid(), type: 'video', title: '', url: '' }); reopen(); };
+    $('#matAddPdf').onclick   = () => { draft.push({ id: uid(), type: 'pdf',   title: '', url: '', pdfName: '' }); reopen(); };
+
+    $$('.mat-del-btn').forEach(btn => btn.onclick = () => { draft.splice(+btn.dataset.idx, 1); reopen(); });
+    $$('.mat-pdf-remove').forEach(btn => btn.onclick = () => { draft[+btn.dataset.idx].url = ''; draft[+btn.dataset.idx].pdfName = ''; reopen(); });
   }, 50);
 }
 
-// Usuário: visualiza o material disponível
-function openMaterialViewer(actTitle, mat) {
-  const videoId = extractYouTubeId(mat.video_url || '');
-  const embedHtml = videoId
-    ? `<div class="video-embed-wrap"><iframe src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen></iframe></div>`
-    : mat.video_url
-      ? `<a class="btn-ghost" href="${escapeHtml(mat.video_url)}" target="_blank" style="display:inline-flex;gap:8px;align-items:center;">▶ Abrir vídeo</a>`
-      : '';
+// Usuário: visualiza lista de materiais
+function openMaterialViewer(actTitle, items) {
+  if (!items || !items.length) {
+    openModal(`📂 ${escapeHtml(actTitle)}`,
+      '<p style="color:var(--text-faint);font-size:13px;">Nenhum material disponível ainda.</p>',
+      [{ label: 'Fechar', cls: 'btn-ghost', onClick: closeModal }]
+    );
+    return;
+  }
 
-  const pdfHtml = mat.pdf_url
-    ? `<a class="btn-ghost" href="${escapeHtml(mat.pdf_url)}" target="_blank" style="display:inline-flex;gap:8px;align-items:center;">📄 ${escapeHtml(mat.pdf_name || 'Baixar PDF')}</a>`
-    : '';
+  const bodyHtml = items.map(item => {
+    if (item.type === 'video') {
+      const ytId = extractYouTubeId(item.url);
+      return `
+        <div class="mat-viewer-item">
+          <div class="mat-viewer-label">▶ ${escapeHtml(item.title || 'Vídeo')}</div>
+          ${ytId
+            ? `<div class="video-embed-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" frameborder="0" allowfullscreen></iframe></div>`
+            : `<a class="btn-ghost" href="${escapeHtml(item.url)}" target="_blank">▶ Abrir vídeo</a>`}
+        </div>`;
+    } else {
+      return `
+        <div class="mat-viewer-item">
+          <a class="btn-ghost mat-pdf-btn" href="${escapeHtml(item.url)}" target="_blank">
+            📄 ${escapeHtml(item.title || item.pdfName || 'Baixar PDF')}
+          </a>
+        </div>`;
+    }
+  }).join('');
 
-  openModal(`📂 ${escapeHtml(actTitle)}`, `
-    ${embedHtml}
-    ${pdfHtml ? `<div style="margin-top:${embedHtml ? '14px' : '0'}">${pdfHtml}</div>` : ''}
-    ${!embedHtml && !pdfHtml ? '<p style="color:var(--text-faint);font-size:13px;">Nenhum material disponível ainda.</p>' : ''}
-  `, [
-    { label: 'Fechar', cls: 'btn-ghost', onClick: closeModal },
-  ]);
+  openModal(`📂 ${escapeHtml(actTitle)}`, bodyHtml,
+    [{ label: 'Fechar', cls: 'btn-ghost', onClick: closeModal }]
+  );
 }
 
 function extractYouTubeId(url) {
@@ -2450,11 +2507,13 @@ async function loadAdminMaterials() {
   let html = '';
   state.study.weeks.forEach(w => {
     w.activities.forEach(a => {
-      const mat = studyMaterials[a.id] || {};
+      const items = studyMaterials[a.id] || [];
+      const videoCount = items.filter(i => i.type === 'video').length;
+      const pdfCount   = items.filter(i => i.type === 'pdf').length;
       const chips = [
-        mat.video_url ? `<span class="tag tag--diff-facil">▶ Vídeo</span>` : '',
-        mat.pdf_url   ? `<span class="tag tag--diff-facil">📄 PDF</span>`   : '',
-        (!mat.video_url && !mat.pdf_url) ? `<span class="tag tag--time" style="opacity:.5;">Sem material</span>` : '',
+        videoCount ? `<span class="tag tag--diff-facil">▶ ${videoCount} vídeo${videoCount>1?'s':''}</span>` : '',
+        pdfCount   ? `<span class="tag tag--diff-facil">📄 ${pdfCount} PDF${pdfCount>1?'s':''}</span>`   : '',
+        (!items.length) ? `<span class="tag tag--time" style="opacity:.5;">Sem material</span>` : '',
       ].join('');
       html += `
         <div class="link-editor-row">
@@ -2467,7 +2526,7 @@ async function loadAdminMaterials() {
   });
   linksEl.innerHTML = html || '<p style="color:var(--text-faint);">Nenhuma atividade encontrada.</p>';
   $$('[data-act]', linksEl).forEach(btn => {
-    btn.onclick = () => openMaterialEditor(btn.dataset.act, btn.dataset.title, studyMaterials[btn.dataset.act] || {});
+    btn.onclick = () => openMaterialEditor(btn.dataset.act, btn.dataset.title, studyMaterials[btn.dataset.act] || []);
   });
 }
 /* ---------------------------------------------------------
