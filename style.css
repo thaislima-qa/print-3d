@@ -297,6 +297,16 @@ body::before{
 .tag--prio-alta{ background: var(--accent-soft); color: var(--accent); }
 .tag--prio-media{ background: var(--surface-3); color: var(--text-muted); }
 .tag--prio-baixa{ background: var(--surface-3); color: var(--text-faint); }
+.tag--custom{ background: var(--accent-2-soft); color: var(--accent-2); }
+
+.week-actions{ display:flex; gap:6px; align-items:center; flex-shrink:0; flex-wrap:wrap; }
+.add-week-btn{
+  width:100%; margin-top:12px; display:flex; justify-content:center;
+  border-style:dashed; color:var(--text-faint);
+}
+.add-week-btn:hover{ color:var(--text); border-color:var(--border-strong); }
+.month-tab--add{ border-style:dashed; color:var(--text-faint); }
+.month-tab--add:hover{ color:var(--text); border-color:var(--border-strong); }
 .activity-actions{ display:flex; align-items:center; gap:8px; margin-top:10px; }
 .activity textarea.note-input{
   width:100%; margin-top:8px; background: var(--surface-3); border:1px solid var(--border);
