@@ -1022,7 +1022,7 @@ function activityHtml(weekId, a) {
           <div class="activity-title">${escapeHtml(a.title)}</div>
           <div class="activity-desc">${escapeHtml(a.desc)}</div>
           <div class="activity-meta">
-            <span class="tag tag--time">⏱ ${escapeHtml(a.time || '—')}</span>
+            <span class="tag tag--time">⏱ ${a.time ? (hoursToHHMM(parseTimeToHours(a.time)) ? hoursToHHMM(parseTimeToHours(a.time))+'h' : escapeHtml(a.time)) : '—'}</span>
             <span class="tag tag--diff-${a.difficulty}">${DIFF_LABEL[a.difficulty] || ''}</span>
             <span class="tag tag--prio-${a.priority}">${PRIO_LABEL[a.priority] || ''}</span>
             ${a.custom ? '<span class="tag tag--custom">minha</span>' : ''}
@@ -1414,7 +1414,12 @@ function openProjectModal(id) {
       <div class="field"><label>Versão</label><input type="text" id="pVersion" value="${escapeHtml(p.version)}"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Tempo de impressão</label><input type="text" id="pPrintTime" value="${escapeHtml(p.printTime)}" placeholder="Ex: 3h20"></div>
+      <div class="field"><label>Tempo de impressão</label>
+        <div class="printtime-input-wrap">
+          <input type="text" id="pPrintTime" value="${escapeHtml(p.printTime)}" placeholder="Ex: 2,7hrs ou 1h30">
+          <span class="printtime-tag" id="pPrintTimeTag" style="display:none;">${p.printTime ? (hoursToHHMM(parseTimeToHours(p.printTime)) ? hoursToHHMM(parseTimeToHours(p.printTime))+'h' : '') : ''}</span>
+        </div>
+      </div>
       <div class="field"><label>Peso (g)</label><input type="number" id="pWeight" value="${escapeHtml(p.weight)}"></div>
     </div>
     <div class="field"><label>Filamento</label><input type="text" id="pFilament" value="${escapeHtml(p.filament)}" placeholder="Ex: PETG Preto"></div>
@@ -1440,6 +1445,19 @@ function openProjectModal(id) {
       toast(isNew ? 'Projeto criado.' : 'Projeto atualizado.');
     }}
   ]);
+
+  setTimeout(() => {
+    const ptInput = $('#pPrintTime');
+    const ptTag   = $('#pPrintTimeTag');
+    if (ptInput && ptTag) {
+      const upd = () => {
+        const fmt = hoursToHHMM(parseTimeToHours(ptInput.value));
+        ptTag.textContent = fmt ? fmt + 'h' : '';
+        ptTag.style.display = fmt ? '' : 'none';
+      };
+      ptInput.addEventListener('input', upd); upd();
+    }
+  }, 50);
 }
 $('#addProjectBtn').onclick = () => openProjectModal(null);
 
@@ -1823,8 +1841,13 @@ function calcProductCost() {
   const rows       = collectFilamentRows();
   const totalG     = rows.reduce((s, r) => s + r.grams, 0);
 
-  if (!totalG && !hours) {
-    $('#prCostBreakdown').innerHTML = '<span class="cost-calc-warn">Adicione filamentos com peso ou preencha o tempo de impressão para calcular.</span>';
+  if (!totalG) {
+    $('#prCostBreakdown').innerHTML = '<span class="cost-calc-warn">Adicione ao menos um filamento com peso (g) para calcular.</span>';
+    return;
+  }
+  if (!hours) {
+    $('#prCostBreakdown').innerHTML = '<span class="cost-calc-warn">Preencha o tempo de impressão para calcular.</span>';
+    highlight('#prPrintTime', 'Tempo de impressão é obrigatório para o cálculo.');
     return;
   }
 
@@ -1863,6 +1886,157 @@ function calcProductCost() {
 }
 
 $('#addProductBtn').onclick = () => openProductModal(null);
+
+/* ---------------------------------------------------------
+   CALCULADORA RÁPIDA DE CUSTO
+--------------------------------------------------------- */
+function openQuickCalc() {
+  // Build filament select options
+  const filOpts = state.filaments.length
+    ? state.filaments.map(f => `<option value="${f.id}">${escapeHtml(f.name)} — ${brl(f.pricePerKg)}/kg</option>`).join('')
+    : '<option value="">Nenhum filamento cadastrado</option>';
+
+  openModal('🧮 Calculadora rápida', `
+    <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:4px;">Calcule o custo de impressão sem precisar criar um produto.</p>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Peso do filamento (g) <span class="required-star">*</span></label>
+        <input type="number" id="qcWeight" min="0" step="0.1" placeholder="Ex: 45">
+      </div>
+      <div class="field">
+        <label>Tempo de impressão <span class="required-star">*</span></label>
+        <div class="printtime-input-wrap">
+          <input type="text" id="qcTime" placeholder="Ex: 2,7hrs ou 1h30">
+          <span class="printtime-tag" id="qcTimeTag" style="display:none;"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Filamento <span class="required-star">*</span></label>
+      <select id="qcFilament">
+        <option value="">Selecione…</option>
+        ${filOpts}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Preço do filamento (R$/kg) <span class="required-star">*</span></label>
+      <input type="number" step="0.01" id="qcPrice" placeholder="Preenchido ao selecionar">
+    </div>
+
+    <div class="field">
+      <label>Desperdício (%)</label>
+      <div class="waste-row">
+        <input type="number" id="qcWaste" min="0" max="100" step="0.5" value="0">
+        <span class="waste-hint" id="qcWasteHint">+ R$ 0,00</span>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="qcCalcBtn" style="width:100%;margin-top:4px;">Calcular</button>
+
+    <div class="qc-result" id="qcResult" style="display:none;">
+      <div class="qc-result-grid">
+        <div class="qc-result-row">
+          <span>Filamento</span>
+          <span id="qcResFilament">—</span>
+        </div>
+        <div class="qc-result-row">
+          <span>Desperdício</span>
+          <span id="qcResWaste">—</span>
+        </div>
+        <div class="qc-result-row">
+          <span>Energia</span>
+          <span id="qcResEnergy">—</span>
+        </div>
+        <div class="qc-result-row qc-result-total">
+          <span>Total estimado</span>
+          <span id="qcResTotal">—</span>
+        </div>
+      </div>
+      <div class="qc-result-tags" id="qcResTags"></div>
+    </div>
+  `, [
+    { label: 'Fechar', cls: 'btn-ghost', onClick: closeModal },
+  ]);
+
+  setTimeout(() => {
+    // auto-fill price when filament selected
+    $('#qcFilament').onchange = e => {
+      const f = state.filaments.find(x => x.id === e.target.value);
+      if (f) {
+        $('#qcPrice').value = f.pricePerKg.toFixed(2);
+        updateQcWasteHint();
+      }
+    };
+
+    // live time tag
+    $('#qcTime').addEventListener('input', () => {
+      const fmt = hoursToHHMM(parseTimeToHours($('#qcTime').value));
+      const tag = $('#qcTimeTag');
+      tag.textContent = fmt ? fmt + 'h' : '';
+      tag.style.display = fmt ? '' : 'none';
+    });
+
+    // live waste hint
+    const updateQcWasteHint = () => {
+      const weightG    = Number($('#qcWeight').value) || 0;
+      const pricePerKg = Number($('#qcPrice').value) || 0;
+      const wastePct   = Number($('#qcWaste').value) || 0;
+      const rawCost    = weightG * (pricePerKg / 1000);
+      const wasteCost  = rawCost * (wastePct / 100);
+      $('#qcWasteHint').textContent = wastePct > 0 ? `+ ${brl(wasteCost)}` : '+ R$ 0,00';
+    };
+    $('#qcWeight').addEventListener('input', updateQcWasteHint);
+    $('#qcPrice').addEventListener('input', updateQcWasteHint);
+    $('#qcWaste').addEventListener('input', updateQcWasteHint);
+
+    // calc
+    $('#qcCalcBtn').onclick = () => {
+      const weightG    = Number($('#qcWeight').value) || 0;
+      const timeStr    = $('#qcTime').value.trim();
+      const filId      = $('#qcFilament').value;
+      const pricePerKg = Number($('#qcPrice').value) || 0;
+      const wastePct   = Number($('#qcWaste').value) || 0;
+
+      // validate all required
+      const missing = [];
+      if (!weightG)   missing.push('Peso');
+      if (!timeStr)   missing.push('Tempo');
+      if (!filId)     missing.push('Filamento');
+      if (!pricePerKg) missing.push('Preço do filamento');
+      if (missing.length) {
+        toast(`Preencha: ${missing.join(', ')}.`);
+        return;
+      }
+
+      const hours       = parseTimeToHours(timeStr);
+      const filCost     = weightG * (pricePerKg / 1000);
+      const wasteCost   = filCost * (wastePct / 100);
+      const powerKW     = (state.finance.printerPower || 0) / 1000;
+      const energyCost  = hours * powerKW * (state.finance.energyPrice || 0);
+      const total       = filCost + wasteCost + energyCost;
+      const hhmm        = hoursToHHMM(hours);
+
+      const f = state.filaments.find(x => x.id === filId);
+
+      $('#qcResFilament').textContent = brl(filCost);
+      $('#qcResWaste').textContent    = `${brl(wasteCost)} (${wastePct}%)`;
+      $('#qcResEnergy').textContent   = `${brl(energyCost)} (${hhmm || hours.toFixed(2) + 'h'} × ${state.finance.printerPower || 0}W)`;
+      $('#qcResTotal').textContent    = brl(total);
+      $('#qcResTags').innerHTML = `
+        <span class="tag tag--time">⚖ ${weightG}g</span>
+        <span class="tag tag--time">⏱ ${hhmm ? hhmm + 'h' : timeStr}</span>
+        ${f ? `<span class="tag tag--time">🧵 ${escapeHtml(f.name)}</span>` : ''}
+        <span class="tag tag--time">${brl(pricePerKg)}/kg</span>
+      `;
+      $('#qcResult').style.display = '';
+    };
+  }, 50);
+}
+
+$('#quickCalcBtn').onclick = () => openQuickCalc();
 
 /* ---------------------------------------------------------
    15. FINANCE
