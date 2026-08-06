@@ -512,6 +512,40 @@ body::before{
 .mat-current-file a{ color:var(--accent-2); text-decoration:none; flex:1; }
 .mat-current-file a:hover{ text-decoration:underline; }
 
+/* Material editor (multi-item) */
+.mat-count{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%;
+  background:var(--accent); color:#0B0E13;
+  font-size:10px; font-weight:700; font-family:var(--font-mono);
+  margin-left:4px; vertical-align:middle;
+}
+.mat-editor-row{ padding:4px 0; }
+.mat-editor-row-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.mat-type-badge{
+  font-size:11px; padding:3px 9px; border-radius:999px;
+  font-family:var(--font-mono); white-space:nowrap; flex-shrink:0;
+}
+.mat-type-video{ background:var(--accent-soft); color:var(--accent); }
+.mat-type-pdf  { background:var(--accent-2-soft); color:var(--accent-2); }
+.mat-title-input{
+  flex:1; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:8px; padding:6px 10px; color:var(--text); font-size:13px; min-width:0;
+}
+.mat-url-input{
+  width:100%; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:8px; padding:7px 10px; color:var(--text); font-size:13px; margin-bottom:4px;
+}
+.mat-add-row{
+  display:flex; gap:8px; margin-top:14px; padding-top:12px;
+  border-top:1px dashed var(--border);
+}
+/* Material viewer */
+.mat-viewer-item{ margin-bottom:14px; }
+.mat-viewer-item:last-child{ margin-bottom:0; }
+.mat-viewer-label{ font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text-muted); }
+.mat-pdf-btn{ display:inline-flex; align-items:center; gap:8px; width:100%; }
+
 /* AMS multi-filament */
 .ams-row{
   display:grid;
