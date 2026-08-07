@@ -397,7 +397,7 @@ body::before{
 .modal-overlay.is-open{ display:flex; }
 .modal{
   background: var(--surface); border:1px solid var(--border-strong); border-radius: var(--radius-lg);
-  width:100%; max-width:540px; max-height:88vh; display:flex; flex-direction:column;
+  width:100%; max-width:540px; max-height:92vh; display:flex; flex-direction:column;
   box-shadow: var(--shadow-pop); animation: popIn .22s ease;
 }
 @keyframes popIn{ from{ transform: scale(.95) translateY(8px); opacity:0;} to{ transform:none; opacity:1;} }
