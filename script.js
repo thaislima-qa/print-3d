@@ -2,7 +2,7 @@
    EXTRUSA — script.js
    Vanilla JS, zero deps. Everything persists to localStorage.
    ========================================================= */
-//
+
 // Guard: if this file ever gets included twice on the same page
 // (e.g. a duplicate <script src="script.js"> tag), the second
 // execution stops here instead of crashing the whole app.
@@ -1991,7 +1991,7 @@ function openQuickCalc() {
         filamentId: row.querySelector('.ams-select').value,
         grams: Number(row.querySelector('.ams-grams-input').value) || 0,
         lockedPrice: Number(row.dataset.lockedPrice) || null,
-      })).filter(r => r.filamentId);
+      })).filter(r => r.filamentId && r.grams > 0);
     }
 
     function qcUpdateTotal() {
@@ -2055,6 +2055,12 @@ function openQuickCalc() {
       const energyCost  = hours * powerKW * tariff;
       const total       = filamentCost + wasteCost + energyCost;
 
+      // Guard: if any value is NaN, something went wrong
+      if (isNaN(total)) {
+        toast('Erro no cálculo — verifique os valores inseridos.');
+        return;
+      }
+
       $('#qcResGrid').innerHTML = `
         <div class="qc-result-row"><span>Filamento (${totalG.toFixed(1)}g)</span><span>${brl(filamentCost)}</span></div>
         ${filLines}
@@ -2074,6 +2080,9 @@ function openQuickCalc() {
         <span class="tag tag--time">🔌 ${brl(energyCost)}</span>
         <span class="tag tag--time">💰 ${brl(total)}</span>`;
       $('#qcResult').style.display = '';
+      // scroll modal body so result is visible
+      const mb = $('#qcResult').closest('.modal-body');
+      if (mb) setTimeout(() => { mb.scrollTop = mb.scrollHeight; }, 30);
     };
   }, 50);
 }
