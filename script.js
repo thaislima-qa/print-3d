@@ -648,7 +648,11 @@ function parseTimeToHours(timeStr) {
   return h + m / 60;
 }
 
-// Format decimal hours → "h:mm"  e.g. 2.7 → "2:42"
+// Parse user-typed decimal that may use comma as separator
+function parseDecimal(str) {
+  if (str === null || str === undefined) return 0;
+  return parseFloat(String(str).replace(',', '.')) || 0;
+}
 function hoursToHHMM(hours) {
   if (!hours || hours <= 0) return null;
   const h = Math.floor(hours);
@@ -1928,11 +1932,11 @@ function openQuickCalc() {
         <div class="field-row" style="margin:0;flex:1;">
           <div class="field" style="margin:0;">
             <label style="font-size:11px;">Potência (W)</label>
-            <input type="number" id="qcPower" value="${state.finance.printerPower || 0}" min="0" step="1">
+            <input type="text" inputmode="decimal" id="qcPower" value="${state.finance.printerPower || 0}" placeholder="Ex: 95">
           </div>
           <div class="field" style="margin:0;">
             <label style="font-size:11px;">Tarifa (R$/kWh)</label>
-            <input type="number" id="qcEnergy" step="0.01" value="${state.finance.energyPrice || 0}">
+            <input type="text" inputmode="decimal" id="qcEnergy" value="${String(state.finance.energyPrice || 0).replace('.', ',')}" placeholder="Ex: 1,10">
           </div>
         </div>
       </div>
@@ -2003,7 +2007,7 @@ function openQuickCalc() {
 
     function qcUpdateWasteHint(rows) {
       if (!rows) rows = qcCollectRows();
-      const wastePct = Number($('#qcWaste').value) || 0;
+      const wastePct = parseDecimal($('#qcWaste').value);
       let rawCost = 0;
       rows.forEach(r => {
         const price = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (state.filaments.find(x => x.id === r.filamentId)?.pricePerKg || 0);
@@ -2020,9 +2024,9 @@ function openQuickCalc() {
     // calc
     $('#qcCalcBtn').onclick = () => {
       const timeStr  = $('#qcTime').value.trim();
-      const wastePct = Number($('#qcWaste').value) || 0;
-      const powerW   = Number($('#qcPower').value) || 0;
-      const tariff   = Number($('#qcEnergy').value) || 0;
+      const wastePct = parseDecimal($('#qcWaste').value);
+      const powerW   = parseDecimal($('#qcPower').value);
+      const tariff   = parseDecimal($('#qcEnergy').value);
       const rows     = qcCollectRows();
 
       // validate
