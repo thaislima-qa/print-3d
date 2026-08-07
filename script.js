@@ -2,7 +2,7 @@
    EXTRUSA — script.js
    Vanilla JS, zero deps. Everything persists to localStorage.
    ========================================================= */
-
+//
 // Guard: if this file ever gets included twice on the same page
 // (e.g. a duplicate <script src="script.js"> tag), the second
 // execution stops here instead of crashing the whole app.
