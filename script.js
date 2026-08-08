@@ -1895,76 +1895,89 @@ $('#addProductBtn').onclick = () => openProductModal(null);
    CALCULADORA RÁPIDA DE CUSTO
 --------------------------------------------------------- */
 function openQuickCalc() {
+  // Reusar exatamente a estrutura do openProductModal,
+  // sem: nome, imagem, categoria, status, preço, arquivo, observações, sold
+  const qp = {
+    weight: 0, printTime: '', filaments: [], wastePct: 0,
+    extraCost: 0, cost: 0,
+  };
+
   openModal('🧮 Calculadora rápida', `
-    <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:4px;">Cálculo rápido sem precisar criar um produto.</p>
+    <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:2px;">Cálculo rápido — sem criar produto.</p>
 
-    <div class="field">
-      <label>Tempo de impressão <span class="required-star">*</span></label>
-      <div class="printtime-input-wrap">
-        <input type="text" id="qcTime" placeholder="Ex: 2,7hrs ou 1h30">
-        <span class="printtime-tag" id="qcTimeTag" style="display:none;"></span>
+    <div class="field-row">
+      <div class="field">
+        <label>Peso total (g) <span style="font-size:10px;color:var(--text-faint);">calculado</span></label>
+        <input type="number" id="qcWeight" value="0" readonly tabindex="-1"
+          style="background:var(--surface-3);color:var(--text-muted);cursor:not-allowed;">
       </div>
-    </div>
-
-    <div class="field">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <label>Filamentos (AMS) <span class="required-star">*</span></label>
-        <button type="button" class="btn-ghost btn-sm" id="qcAddFilament">+ Filamento</button>
-      </div>
-      <div id="qcFilamentRows"></div>
-      <div class="ams-total-row">
-        <span class="ams-total-label">Peso total:</span>
-        <span class="ams-total-value" id="qcTotalWeight">0 g</span>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Desperdício (%)</label>
-      <div class="waste-row">
-        <input type="number" id="qcWaste" min="0" max="100" step="0.5" value="0">
-        <span class="waste-hint" id="qcWasteHint">+ R$ 0,00</span>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Energia</label>
-      <div class="qc-energy-row">
-        <div class="field-row" style="margin:0;flex:1;">
-          <div class="field" style="margin:0;">
-            <label style="font-size:11px;">Potência (W)</label>
-            <input type="text" inputmode="decimal" id="qcPower" value="${state.finance.printerPower || 0}" placeholder="Ex: 95">
-          </div>
-          <div class="field" style="margin:0;">
-            <label style="font-size:11px;">Tarifa (R$/kWh)</label>
-            <input type="text" inputmode="decimal" id="qcEnergy" value="${String(state.finance.energyPrice || 0).replace('.', ',')}" placeholder="Ex: 1,10">
-          </div>
+      <div class="field">
+        <label>Tempo de impressão <span class="required-star">*</span></label>
+        <div class="printtime-input-wrap">
+          <input type="text" id="qcTime" placeholder="Ex: 2,7hrs ou 1h30">
+          <span class="printtime-tag" id="qcTimeTag" style="display:none;"></span>
         </div>
       </div>
     </div>
 
-    <button class="btn-primary" id="qcCalcBtn" style="width:100%;margin-top:4px;">Calcular</button>
+    <!-- Multi-filament AMS -->
+    <div class="field">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <label>Filamentos (AMS) <span class="required-star">*</span></label>
+        <button type="button" class="btn-ghost btn-sm" id="qcAddFilamentRow">+ Adicionar filamento</button>
+      </div>
+      <div id="qcFilamentRows"></div>
+      <div class="ams-total-row">
+        <span class="ams-total-label">Peso total calculado:</span>
+        <span class="ams-total-value" id="qcTotalWeight">0 g</span>
+      </div>
+    </div>
 
-    <div class="qc-result" id="qcResult" style="display:none;">
-      <div class="qc-result-grid" id="qcResGrid"></div>
-      <div class="qc-result-tags" id="qcResTags"></div>
+    <!-- Desperdício -->
+    <div class="field">
+      <label>Desperdício de filamento (%)</label>
+      <div class="waste-row">
+        <input type="number" id="qcWastePct" min="0" max="100" step="0.5" value="0">
+        <span class="waste-hint" id="qcWasteHint">+ R$ 0,00 sobre o custo de filamento</span>
+      </div>
+      <span class="field-hint">Percentual aplicado sobre o custo total de filamentos.</span>
+    </div>
+
+    <!-- Custos extras -->
+    <div class="field">
+      <label>Custos extras (R$) — embalagem, mão de obra etc.</label>
+      <input type="number" step="0.01" id="qcExtraCost" value="0">
+    </div>
+
+    <!-- Custo calculado -->
+    <div class="field">
+      <label>Custo total (R$) <span style="font-size:10px;color:var(--text-faint);">calculado</span></label>
+      <input type="number" step="0.01" id="qcCost" value="" readonly tabindex="-1"
+        style="background:var(--surface-3);color:var(--accent);font-family:var(--font-mono);font-weight:700;cursor:not-allowed;">
+    </div>
+
+    <div class="cost-calc-box">
+      <button type="button" class="btn-primary" id="qcCalcBtn" style="width:100%;">🧮 Calcular custo</button>
+      <p class="cost-calc-breakdown" id="qcCostBreakdown"></p>
     </div>
   `, [
     { label: 'Fechar', cls: 'btn-ghost', onClick: closeModal },
   ]);
 
-  // ---- setup after render ----
   setTimeout(() => {
+    // printTime live tag
+    const ptInput = $('#qcTime');
+    const ptTag   = $('#qcTimeTag');
+    if (ptInput && ptTag) {
+      const upd = () => {
+        const fmt = hoursToHHMM(parseTimeToHours(ptInput.value));
+        ptTag.textContent = fmt ? fmt + 'h' : '';
+        ptTag.style.display = fmt ? '' : 'none';
+      };
+      ptInput.addEventListener('input', upd);
+    }
 
-    // live time tag
-    $('#qcTime').addEventListener('input', () => {
-      const fmt = hoursToHHMM(parseTimeToHours($('#qcTime').value));
-      const tag = $('#qcTimeTag');
-      tag.textContent = fmt ? fmt + 'h' : '';
-      tag.style.display = fmt ? '' : 'none';
-    });
-
-    // filament rows — reuse the same helpers as product modal
-    // but scoped to qc- prefix
+    // filament rows — exact same helpers, scoped to qc
     function qcAddFilamentRow(filamentId = '', grams = 0, lockedPrice = null) {
       const container = $('#qcFilamentRows');
       if (!container) return;
@@ -2001,92 +2014,78 @@ function openQuickCalc() {
     function qcUpdateTotal() {
       const rows  = qcCollectRows();
       const total = rows.reduce((s, r) => s + r.grams, 0);
-      $('#qcTotalWeight').textContent = total.toFixed(1) + ' g';
+      const wEl   = $('#qcWeight');
+      const tEl   = $('#qcTotalWeight');
+      if (wEl) wEl.value = total.toFixed(1);
+      if (tEl) tEl.textContent = total.toFixed(1) + ' g';
       qcUpdateWasteHint(rows);
     }
 
     function qcUpdateWasteHint(rows) {
       if (!rows) rows = qcCollectRows();
-      const wastePct = parseDecimal($('#qcWaste').value);
+      const wastePct = Number($('#qcWastePct').value) || 0;
+      const hint = $('#qcWasteHint');
+      if (!hint) return;
       let rawCost = 0;
       rows.forEach(r => {
-        const price = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (state.filaments.find(x => x.id === r.filamentId)?.pricePerKg || 0);
-        rawCost += r.grams * (price / 1000);
+        const p = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice
+          : (state.filaments.find(x => x.id === r.filamentId)?.pricePerKg || 0);
+        rawCost += r.grams * (p / 1000);
       });
-      $('#qcWasteHint').textContent = wastePct > 0 ? `+ ${brl(rawCost * wastePct / 100)}` : '+ R$ 0,00';
+      hint.textContent = wastePct > 0
+        ? `+ ${brl(rawCost * wastePct / 100)} sobre o custo de filamento`
+        : '+ R$ 0,00 sobre o custo de filamento';
     }
 
-    // seed one empty row
-    qcAddFilamentRow();
-    $('#qcAddFilament').onclick = () => qcAddFilamentRow();
-    $('#qcWaste').addEventListener('input', () => qcUpdateWasteHint());
+    $('#qcAddFilamentRow').onclick = () => qcAddFilamentRow();
+    $('#qcWastePct').oninput = () => qcUpdateWasteHint();
 
-    // calc
     $('#qcCalcBtn').onclick = () => {
-      const timeStr  = $('#qcTime').value.trim();
-      const wastePct = parseDecimal($('#qcWaste').value);
-      const powerW   = parseDecimal($('#qcPower').value);
-      const tariff   = parseDecimal($('#qcEnergy').value);
-      const rows     = qcCollectRows();
+      const printTimeStr = $('#qcTime').value.trim();
+      const extra        = Number($('#qcExtraCost').value) || 0;
+      const wastePct     = Number($('#qcWastePct').value) || 0;
+      const hours        = parseTimeToHours(printTimeStr);
+      const rows         = qcCollectRows();
+      const totalG       = rows.reduce((s, r) => s + r.grams, 0);
 
-      // validate
-      if (!timeStr)    { highlight('#qcTime', 'Informe o tempo de impressão.'); return; }
-      if (!rows.length) { toast('Adicione ao menos um filamento.'); return; }
-      const hasGrams = rows.some(r => r.grams > 0);
-      if (!hasGrams)   { toast('Informe o peso (g) de ao menos um filamento.'); return; }
+      // — mesmas validações do calcProductCost —
+      if (!rows.length || !totalG) {
+        $('#qcCostBreakdown').innerHTML = '<span class="cost-calc-warn">Adicione ao menos um filamento com peso (g) para calcular.</span>';
+        return;
+      }
+      if (!hours) {
+        $('#qcCostBreakdown').innerHTML = '<span class="cost-calc-warn">Preencha o tempo de impressão para calcular.</span>';
+        highlight('#qcTime', 'Tempo de impressão é obrigatório para o cálculo.');
+        return;
+      }
 
-      const hours   = parseTimeToHours(timeStr);
-      const hhmm    = hoursToHHMM(hours);
-      const totalG  = rows.reduce((s, r) => s + r.grams, 0);
-
-      // filament cost per row
       let filamentCost = 0;
-      let filLines = '';
+      let filamentLines = '';
       rows.forEach(r => {
         const f = state.filaments.find(x => x.id === r.filamentId);
         const pricePerKg = (r.lockedPrice && r.lockedPrice > 0) ? r.lockedPrice : (f ? f.pricePerKg : 0);
         const cost = r.grams * (pricePerKg / 1000);
         filamentCost += cost;
-        filLines += `
-          <div class="qc-result-row qc-result-sub">
-            <span>↳ ${escapeHtml(f ? f.name : '?')} (${r.grams.toFixed(1)}g)</span>
-            <span>${brl(cost)}</span>
-          </div>`;
+        const priceNote = (r.lockedPrice && f && r.lockedPrice !== f.pricePerKg)
+          ? ` <span style="color:var(--warn);font-size:10px;">histórico</span>` : '';
+        filamentLines += `&nbsp;&nbsp;↳ ${escapeHtml(f ? f.name : r.filamentId)}: ${r.grams.toFixed(1)}g × ${brl(pricePerKg)}/kg${priceNote} = <strong>${brl(cost)}</strong><br>`;
       });
 
-      const wasteCost   = filamentCost * (wastePct / 100);
-      const powerKW     = powerW / 1000;
-      const energyCost  = hours * powerKW * tariff;
-      const total       = filamentCost + wasteCost + energyCost;
+      const wasteCost  = filamentCost * (wastePct / 100);
+      const powerKW    = (state.finance.printerPower || 0) / 1000;
+      const energyCost = hours * powerKW * (state.finance.energyPrice || 0);
+      const total      = filamentCost + wasteCost + energyCost + extra;
+      const hhmm       = hoursToHHMM(hours);
 
-      // Guard: if any value is NaN, something went wrong
-      if (isNaN(total)) {
-        toast('Erro no cálculo — verifique os valores inseridos.');
-        return;
-      }
-
-      $('#qcResGrid').innerHTML = `
-        <div class="qc-result-row"><span>Filamento (${totalG.toFixed(1)}g)</span><span>${brl(filamentCost)}</span></div>
-        ${filLines}
-        <div class="qc-result-row"><span>Desperdício (${wastePct}%)</span><span>${brl(wasteCost)}</span></div>
-        <div class="qc-result-row">
-          <span>Energia (${hhmm ? hhmm+'h' : hours.toFixed(2)+'h'} × ${powerW}W × ${brl(tariff)}/kWh)</span>
-          <span>${brl(energyCost)}</span>
-        </div>
-        <div class="qc-result-row qc-result-total">
-          <span>Total estimado</span>
-          <span>${brl(total)}</span>
-        </div>`;
-
-      $('#qcResTags').innerHTML = `
-        <span class="tag tag--time">⚖ ${totalG.toFixed(1)}g</span>
-        <span class="tag tag--time">⏱ ${hhmm ? hhmm+'h' : timeStr}</span>
-        <span class="tag tag--time">🔌 ${brl(energyCost)}</span>
-        <span class="tag tag--time">💰 ${brl(total)}</span>`;
-      $('#qcResult').style.display = '';
-      // scroll modal body so result is visible
-      const mb = $('#qcResult').closest('.modal-body');
-      if (mb) setTimeout(() => { mb.scrollTop = mb.scrollHeight; }, 30);
+      $('#qcCost').value = total.toFixed(2);
+      $('#qcCostBreakdown').innerHTML = `
+        Filamento: <strong>${brl(filamentCost)}</strong> (${totalG.toFixed(1)}g total)<br>
+        ${filamentLines}
+        Desperdício (${wastePct}%): <strong>${brl(wasteCost)}</strong><br>
+        Energia: <strong>${brl(energyCost)}</strong> (${hhmm ? hhmm+'h' : hours.toFixed(2)+'h'} × ${state.finance.printerPower||0}W × ${brl(state.finance.energyPrice||0)}/kWh)<br>
+        Extras: <strong>${brl(extra)}</strong><br>
+        <span style="color:var(--accent);font-weight:700;">Total estimado: ${brl(total)}</span>
+      `;
     };
   }, 50);
 }
